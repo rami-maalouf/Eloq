@@ -1,6 +1,7 @@
 # Eloq's server on oracle
 
-Snapback 4 serves Eloq's sync on the same ARM64 VPS as Flint, set up the same way.
+Snapback 4 serves Eloq's sync at https://eloq.orbitlabs.studio (an A record in Vercel DNS to
+oracle, 192.18.154.172), on the same ARM64 VPS as Flint, set up the same way.
 
 - **Binary.** snapback4 0.4.53 built from expo/snapback PR #25 (`07ef490ed`, rusqlite 0.41.1,
   SQLite 3.54.1) for linux-arm64 in `rust:1.97-bookworm`, because npm ships no linux-arm64
@@ -13,7 +14,9 @@ Snapback 4 serves Eloq's sync on the same ARM64 VPS as Flint, set up the same wa
 - **Bridge.** `eloq-snapback-proxy.socket` on the traefik network's gateway, `172.26.0.1:4421`,
   forwarding to loopback (`systemd-socket-proxyd`).
 - **Route.** `traefik-eloq.yml`, merged by hand into `/matrix/traefik/config/provider.yml`, which
-  other services share: back it up, merge, never overwrite. Replace `ELOQ_HOST`.
+  other services share: back it up, merge, never overwrite. Replace `ELOQ_HOST` with `eloq.orbitlabs.studio`. On 2026-11-14 the file had been rewritten
+  with only Flowback's route (Flint was down): restore other services from their own committed
+  fragments when that happens, and keep a dated backup beside the file before every edit.
 - **Backups.** `eloq-backup.timer` at 04:20 UTC runs `/opt/eloq/backup.sh /var/backups/eloq`: it
   stops the backend, archives the whole deployment, starts it again, keeps 30 archives. Copy them
   off the server too; nothing does that yet.

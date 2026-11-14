@@ -29,5 +29,14 @@ cd app && bun exact.mjs mac --run # the macOS app
 The app expects an Exact checkout at `../../expo-exact-eloq` with the Snapback
 adapter in it (`scripts/sync-snapback-adapter.sh`).
 
+`app.ts` names the local development server, so tests run against it. A build for
+daily use bakes the real server instead:
+
+```sh
+cd app && EXACT_BACKEND_ORIGIN=https://eloq.orbitlabs.studio bun exact.mjs mac --run
+```
+
+Agents connect through `services/mcp` with `ELOQ_URL=https://eloq.orbitlabs.studio`.
+
 Status: early. The app is still the sync starter; the vocabulary app is being
 built on top of it.
