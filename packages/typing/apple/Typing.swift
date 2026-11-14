@@ -379,10 +379,13 @@ private final class OfferPanel: NSPanel {
         let footer = NSTextField(labelWithString: "Tab or a number swaps · keep typing to keep")
         footer.font = .systemFont(ofSize: NSFont.smallSystemFontSize - 1)
         footer.textColor = .tertiaryLabelColor
+        footer.lineBreakMode = .byTruncatingTail
         stack.addArrangedSubview(footer)
 
+        // measured after layout, so the footer and the longest hint fit inside the rounded edge
+        stack.layoutSubtreeIfNeeded()
         let size = stack.fittingSize
-        let width = min(max(size.width, 220), 340)
+        let width = min(max(size.width + 4, 240), 360)
         // below the cursor's line, kept on the cursor's screen
         let screen = NSScreen.screens.first { $0.frame.contains(caret.origin) } ?? NSScreen.main
         var origin = NSPoint(x: caret.minX - 14, y: caret.minY - size.height - 6)
