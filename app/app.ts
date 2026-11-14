@@ -62,6 +62,44 @@ function ack(write: Write): Reply {
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+// a day as YYYY-MM-DD in utc, and the monday that starts its week
+const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const weekOf = (day: string) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  return dayOf(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000);
+};
+
+// counts of the last eight weeks from what this device keeps: per word this week, and per week
+async function progress(db: Snapback, terms: Term[], now: number) {
+  const thisWeek = weekOf(dayOf(now));
+  const since = dayOf(new Date(`${thisWeek}T00:00:00Z`).getTime() - 7 * 7 * 86_400_000);
+  const usage = await db.readAll(api.usageSince, { day: since }, now);
+  const scans = await db.readAll(api.recentScans, {}, now);
+  const byId = new Map(terms.map((t) => [t.id, t]));
+  const weeks = new Map<string, { start: string; spokenWords: number; overused: number; targets: number }>();
+  const week = (start: string) => weeks.get(start) ?? (weeks.set(start, { start, spokenWords: 0, overused: 0, targets: 0 }), weeks.get(start)!);
+  for (const s of scans) if (s.day >= since && s.sourceKind !== 'obsidian') week(weekOf(s.day)).spokenWords += s.wordCount;
+  const per = new Map<string, Result<'library'>['stats'][number]>();
+  for (const u of usage) {
+    const w = week(weekOf(u.day));
+    if (u.kind === 'overused_seen') w.overused += u.count;
+    if (u.kind === 'target_used') w.targets += u.count;
+    if (weekOf(u.day) !== thisWeek) continue;
+    const t = byId.get(String(u.term));
+    if (!t) continue;
+    const row = per.get(t.id) ?? { id: t.id, text: t.text, overused: t.overused, said: 0, typed: 0, swapped: 0, targetUsed: 0, per1000: 0 };
+    if (u.kind === 'overused_seen') u.channel === 'speech' ? (row.said += u.count) : (row.typed += u.count);
+    if (u.kind === 'swapped') row.swapped += u.count;
+    if (u.kind === 'target_used') row.targetUsed += u.count;
+    per.set(t.id, row);
+  }
+  const spokenWords = weeks.get(thisWeek)?.spokenWords ?? 0;
+  const stats = [...per.values()]
+    .map((r) => ({ ...r, per1000: spokenWords ? Math.round((r.said / spokenWords) * 10_000) / 10 : 0 }))
+    .sort((a, b) => (b.said + b.typed + b.targetUsed) - (a.said + a.typed + a.targetUsed));
+  return { stats, weeks: [...weeks.values()].sort((a, b) => (a.start < b.start ? 1 : -1)), spokenWords };
+}
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 const sources: Sources = {
@@ -69,7 +107,7 @@ const sources: Sources = {
   library: ([now], store, storage, native): Promise<Result<'library'>> =>
     withClient(store, storage, native, now, async (db) => {
       const principal = db.session?.principal ?? '';
-      const signedOut = { principal: '', online: false, sending: 0, terms: [], links: [] };
+      const signedOut = { principal: '', online: false, sending: 0, terms: [], links: [], stats: [], weeks: [], spokenWords: 0 };
       if (!principal) return signedOut;
       // the server no longer takes this session (revoked, expired, or the account is gone):
       // forget it here and show sign-in; what this device keeps stays for that account
@@ -98,7 +136,8 @@ const sources: Sources = {
         pending: (l as { pending?: boolean }).pending === true,
       }));
       const sending = terms.filter((t) => t.pending).length + links.filter((l) => l.pending).length;
-      return { principal, online: round.ok, sending, terms, links };
+      const { stats, weeks, spokenWords } = await progress(db, terms, now);
+      return { principal, online: round.ok, sending, terms, links, stats, weeks, spokenWords };
     }),
 
   signup: ([email, password, now], store, storage, native) => withClient(store, storage, native, now, async (db) => {

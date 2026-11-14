@@ -10,6 +10,7 @@ routes nav
     editTerm "/term/:id/edit"
     addLink "/term/:id/link"
   tab inbox "/inbox"
+  tab progress "/progress"
 
 shape Clock
   epochAtZero: number
@@ -43,12 +44,29 @@ shape Link
   caution: string
   example: string
   pending: bool
+shape TermStat
+  id: string
+  text: string
+  overused: bool
+  said: number
+  typed: number
+  swapped: number
+  targetUsed: number
+  per1000: number
+shape Week
+  start: string
+  spokenWords: number
+  overused: number
+  targets: number
 shape Library
   principal: string
   online: bool
   sending: number
   terms: Term[]
   links: Link[]
+  stats: TermStat[]
+  weeks: Week[]
+  spokenWords: number
 shape Reply
   ok: bool
   id: string
@@ -337,6 +355,44 @@ component App
                         row padding-top=8 padding-bottom=8
                           textarea value=linkUseWhen input=editLinkUseWhen placeholder="Optional" aria-label="Use it when"
                             rows=3 testId="link-use-when" flex=1 min-width=0
+                if e.name == "progress"
+                  column navigationKey=`${e.id}` navigationScroll="progress-list" position="absolute" inset=0
+                    display="flex" flex-direction="column"
+                    header display="flex" align-items="center" padding="8px 16px"
+                      text "Progress" role="heading" aria-level=1 flex=1
+                    if lib.weeks.length == 0
+                      EmptyState(symbol="symbol:chart", title="Nothing Counted Yet", message="Your agents count your overused and target words in what you say (record_transcript); they appear here by week.")
+                    else
+                      list id="progress-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        section
+                          header
+                            text "This week"
+                          if lib.stats.filter(r => r.overused).length == 0
+                            row
+                              text "No overused words counted this week." color="-exact-secondary-label"
+                          for r, i in lib.stats.filter(x => x.overused) key=r.id
+                            row testId=`stat-${i}`
+                              column flex=1 min-width=0 gap=2
+                                text r.text
+                                text (r.swapped > 0 ? `swapped ${plural(r.swapped, "time", "times")}` : r.typed > 0 ? `typed ${plural(r.typed, "time", "times")}` : `said ${plural(r.said, "time", "times")}`) font="-exact-footnote" color="-exact-secondary-label"
+                              text `${r.said + r.typed}` font-variant-numeric="tabular-nums" testId=`stat-count-${i}`
+                          footer
+                            text (lib.spokenWords > 0 ? `${plural(lib.spokenWords, "word", "words")} of speech counted this week` : "")
+                        if lib.stats.filter(r => r.targetUsed > 0).length > 0
+                          section
+                            header
+                              text "Targets you used"
+                            for r in lib.stats.filter(x => x.targetUsed > 0) key=r.id
+                              row
+                                text r.text flex=1
+                                text `${r.targetUsed}` font-variant-numeric="tabular-nums"
+                        section
+                          header
+                            text "By week"
+                          for w in lib.weeks key=w.start
+                            row
+                              text `Week of ${w.start}` flex=1
+                              text `${w.overused} overused · ${plural(w.targets, "target", "targets")}` font-variant-numeric="tabular-nums" color="-exact-secondary-label"
                 if e.name == "inbox"
                   column navigationKey=`${e.id}` navigationScroll="inbox-list" position="absolute" inset=0
                     display="flex" flex-direction="column"
@@ -367,6 +423,10 @@ component App
             testId="tab-library" flex=1
             image "symbol:book"
             text "Library"
+          button role="tab" aria-controls="panel-progress" aria-selected=(nav.tab == "progress") press=pick("progress")
+            testId="tab-progress" flex=1
+            image "symbol:chart"
+            text "Progress"
           button role="tab" aria-controls="panel-inbox" aria-selected=(nav.tab == "inbox") press=pick("inbox")
             testId="tab-inbox" flex=1
             image "symbol:sparkles"

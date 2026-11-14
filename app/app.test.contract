@@ -75,3 +75,12 @@ test "the wrong password is refused"
   tap "login"
   clock data
   expect text "auth-error" == "That email and password don’t match."
+
+test "progress starts empty with its next step"
+  type "email" "progress@example.com"
+  type "password" "correct horse battery staple"
+  tap "signup"
+  clock data
+  tap "tab-progress"
+  clock settle
+  expect tree missing "stat-0"
