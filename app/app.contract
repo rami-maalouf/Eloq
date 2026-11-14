@@ -2,6 +2,7 @@
 // app.ts answers every read from this device's Snapback partition and syncs it; a write is
 // kept here at once and sent by the next sync, so everything works offline.
 use EmptyState from "exact:content"
+use typingStatus, setTypingTable, openAccessibilitySettings, typingmove, TypingStatus, TypingMove from "@eloq/typing"
 
 routes nav
   tab library "/"
@@ -67,6 +68,7 @@ shape Library
   stats: TermStat[]
   weeks: Week[]
   spokenWords: number
+  typing: string
 shape Reply
   ok: bool
   id: string
@@ -99,14 +101,19 @@ component App
   state linkUseWhen = ""
   state refusal = ""
   state aimed = ""
+  // the typing table last handed to the overlay
+  state typingSent = ""
   resource time = exactTime() as shape Clock
   resource lib = library() with time.epochAtZero + sampledAt as shape Library else empty()
+  resource typing = typingStatus() as shape TypingStatus else empty()
   mutation signed as shape Reply refreshes lib
   mutation added as shape Reply queue refreshes lib then afterAdd
   mutation edited as shape Reply queue refreshes lib then afterEdit
   mutation removed as shape Reply queue refreshes lib
   mutation linked as shape Reply queue refreshes lib then afterLink
   mutation reviewed as shape Reply queue refreshes lib
+  mutation typingSet as shape TypingStatus
+  mutation typed as shape Reply queue
   derive signedIn = lib.principal != ""
   derive writing = pending(signed) or pending(added) or pending(edited) or pending(removed) or pending(linked) or pending(reviewed)
   derive shown = lib.terms.filter(t => shownBy(t, filter) and matches(t, query))
@@ -123,6 +130,14 @@ component App
     if not writing
       sampledAt = performanceNow()
       refresh lib
+    if lib.typing != "" and lib.typing != typingSent
+      typingSent = lib.typing
+      send typingSet = setTypingTable(table=lib.typing)
+  // the overlay saw an overused word in another app, swapped it, or it was kept
+  action moved(m: TypingMove)
+    send typed = recordTyping(m.kind, m.term, m.app, time.epochAtZero + performanceNow())
+  action allowTyping
+    openAccessibilitySettings()
   action editEmail(v: string)
     email = v
   action editPassword(v: string)
@@ -207,7 +222,7 @@ component App
     send reviewed = removeLink(id, time.epochAtZero + performanceNow())
 
   view
-    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow testId="app" width="100%" height="100%"
+    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow typingmove=moved testId="app" width="100%" height="100%"
       display="flex" flex-direction="column"
       if not signedIn and pending(lib)
         column flex=1 min-height=0
@@ -360,6 +375,12 @@ component App
                     display="flex" flex-direction="column"
                     header display="flex" align-items="center" padding="8px 16px"
                       text "Progress" role="heading" aria-level=1 flex=1
+                    if typing.available
+                      row padding="0 16px 8px" gap=8 align-items="center" testId="typing-status"
+                        text (typing.running ? "Typing in other apps: on" : typing.trusted ? "Typing in other apps: starting" : "Typing in other apps needs Accessibility permission") flex=1 color="-exact-secondary-label"
+                        if not typing.trusted
+                          button press=allowTyping buttonStyle="bordered" testId="allow-typing"
+                            text "Allow…"
                     if lib.weeks.length == 0
                       EmptyState(symbol="symbol:chart", title="Nothing Counted Yet", message="Your agents count your overused and target words in what you say (record_transcript); they appear here by week.")
                     else

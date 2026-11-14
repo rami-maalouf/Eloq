@@ -1,0 +1,51 @@
+{
+  "kind": "interface",
+  "name": "@eloq/typing",
+  "version": "1.0.0",
+  "shapes": {
+    "TypingStatus": {
+      "available": "bool",
+      "trusted": "bool",
+      "running": "bool",
+      "words": "number"
+    },
+    "TypingMove": {
+      "kind": "string",
+      "term": "string",
+      "replacement": "string",
+      "app": "string"
+    }
+  },
+  "names": [
+    {
+      "source": "typingStatus",
+      "live": true,
+      "answers": "TypingStatus",
+      "substitute": {
+        "default": { "available": false, "trusted": false, "running": false, "words": 0 },
+        "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
+      }
+    },
+    {
+      "send": "setTypingTable",
+      "origin": "app",
+      "options": { "table": "string" },
+      "answers": "TypingStatus",
+      "substitute": {
+        "default": { "available": false, "trusted": false, "running": false, "words": 0 },
+        "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
+      }
+    },
+    {
+      "send": "openAccessibilitySettings",
+      "origin": "app",
+      "options": {},
+      "answers": null,
+      "substitute": {
+        "journal": true,
+        "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
+      }
+    },
+    { "event": "typingmove", "on": "root", "raised": "emit", "args": ["TypingMove"], "hold": 64 }
+  ]
+}

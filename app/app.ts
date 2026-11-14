@@ -63,6 +63,18 @@ function ack(write: Write): Reply {
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
 
+// what the typing overlay needs: the matcher's table of overused words, and each one's accepted
+// moves (the targets to offer, first the one with the highest confidence)
+function typingTable(terms: Term[], links: Link[]) {
+  const table = tableForTyping(buildIndex(terms.filter((t) => t.overused).map((t) => ({ id: t.id, text: t.text, forms: t.forms }))));
+  const moves: Record<string, Array<{ id: string; text: string; useWhen: string }>> = {};
+  for (const l of [...links].sort((a, b) => b.confidence - a.confidence)) {
+    if (l.status !== 'accepted' || !l.toText) continue;
+    (moves[l.from] ??= []).push({ id: l.to, text: l.toText, useWhen: l.useWhen });
+  }
+  return { ...table, moves };
+}
+
 // app:/data/snapshot.json: what other programs on this mac read without the app's database: the
 // old eloq app's snapshot (version 1) for the browser extension and obsidian plugin, plus the
 // typing table for the typing overlay. written only when it changes.
@@ -87,7 +99,7 @@ async function exportSnapshot(storage: Storage, terms: Term[], links: Link[], no
       suggestedConnections: count('suggested'), dismissedConnections: count('dismissed'),
     },
     words, connections,
-    typing: tableForTyping(buildIndex(terms.filter((t) => t.overused).map((t) => ({ id: t.id, text: t.text, forms: t.forms })))),
+    typing: typingTable(terms, links),
   };
   const key = JSON.stringify(body);
   if (key === lastExport) return;
@@ -140,7 +152,7 @@ const sources: Sources = {
   library: ([now], store, storage, native): Promise<Result<'library'>> =>
     withClient(store, storage, native, now, async (db) => {
       const principal = db.session?.principal ?? '';
-      const signedOut = { principal: '', online: false, sending: 0, terms: [], links: [], stats: [], weeks: [], spokenWords: 0 };
+      const signedOut = { principal: '', online: false, sending: 0, terms: [], links: [], stats: [], weeks: [], spokenWords: 0, typing: '' };
       if (!principal) return signedOut;
       // the server no longer takes this session (revoked, expired, or the account is gone):
       // forget it here and show sign-in; what this device keeps stays for that account
@@ -171,7 +183,7 @@ const sources: Sources = {
       const sending = terms.filter((t) => t.pending).length + links.filter((l) => l.pending).length;
       const { stats, weeks, spokenWords } = await progress(db, terms, now);
       await exportSnapshot(storage, terms, links, now);
-      return { principal, online: round.ok, sending, terms, links, stats, weeks, spokenWords };
+      return { principal, online: round.ok, sending, terms, links, stats, weeks, spokenWords, typing: JSON.stringify(typingTable(terms, links)) };
     }),
 
   signup: ([email, password, now], store, storage, native) => withClient(store, storage, native, now, async (db) => {
@@ -222,6 +234,14 @@ const sources: Sources = {
         rationale: rationale.trim(), useWhen: useWhen.trim(), caution: '', example: '',
       }, now));
     }),
+
+  // the typing overlay saw an overused word, swapped it, or the person kept it: a count for
+  // today, by app; never the text
+  recordTyping: ([kind, term, app, now], store, storage, native) =>
+    withDevice(store, storage, native, now, async (db) => ack(await db.write(api.addUsage, {
+      term, day: dayOf(now), channel: 'typing', kind: kind as 'overused_seen' | 'swapped' | 'kept',
+      source: (app || 'unknown').slice(0, 160), count: 1,
+    }, now))),
 
   setLinkStatus: ([id, status, now], store, storage, native) =>
     withDevice(store, storage, native, now, async (db) => ack(await db.write(api.setLinkStatus, {
