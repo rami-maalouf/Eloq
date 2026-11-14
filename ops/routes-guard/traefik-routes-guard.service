@@ -1,0 +1,8 @@
+[Unit]
+Description=put shared traefik routes back after a matrix playbook rewrite
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/traefik-routes-guard/merge-routes.py

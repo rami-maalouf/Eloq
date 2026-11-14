@@ -1,0 +1,9 @@
+[Unit]
+Description=watch the shared traefik provider file
+
+[Path]
+PathChanged=/matrix/traefik/config/provider.yml
+Unit=traefik-routes-guard.service
+
+[Install]
+WantedBy=multi-user.target

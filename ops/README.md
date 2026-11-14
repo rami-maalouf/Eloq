@@ -37,3 +37,21 @@ ssh oracle 'sudo /opt/eloq/backup.sh /var/backups/eloq &&
 ```sh
 ssh oracle 'systemctl status eloq-snapback --no-pager; curl -s http://127.0.0.1:4420/auth/config'
 ```
+
+## shared traefik routes (routes-guard/)
+
+`/matrix/traefik/config/provider.yml` belongs to the matrix playbook in the multiplexer repo.
+each playbook run rewrites it from that repo's inventory and drops every route the inventory
+does not list (2026-11-14 08:06 and 16:22 UTC: eloq and flint went to 404).
+
+`traefik-routes-guard.path` watches the file. after a rewrite, `merge-routes.py` merges every
+fragment in `/etc/traefik-routes.d/*.yml` back in, and writes only when something is missing.
+
+    sudo install -d -m 0755 /opt/traefik-routes-guard /etc/traefik-routes.d
+    sudo install -m 0755 routes-guard/merge-routes.py /opt/traefik-routes-guard/
+    sudo install -m 0644 routes-guard/fragments/*.yml /etc/traefik-routes.d/
+    sudo install -m 0644 routes-guard/traefik-routes-guard.{service,path} /etc/systemd/system/
+    sudo systemctl daemon-reload && sudo systemctl enable --now traefik-routes-guard.path
+
+the flint fragments are copies of `ops/traefik-habits.yml` and `ops/mcp/traefik.fragment.yml`
+in habit-system-fullstack. when flint changes its routes, copy them again.

@@ -1,0 +1,36 @@
+# merge these entries into the existing provider file; preserve other routes.
+http:
+  middlewares:
+    habit-system-headers:
+      headers:
+        customRequestHeaders:
+          x-snapback-persona: ""
+    # testflight build 3 links its privacy row here; the policy lives on flint.orbitlabs.studio
+    flint-privacy-moved:
+      redirectRegex:
+        regex: ^https://habits\.ramimaalouf\.com/privacy.*
+        replacement: https://flint.orbitlabs.studio/privacy
+        permanent: true
+  routers:
+    habit-privacy-moved:
+      rule: Host(`habits.ramimaalouf.com`) && (Path(`/privacy`) || PathPrefix(`/privacy/`))
+      priority: 9000
+      entryPoints: [web-secure]
+      middlewares: [flint-privacy-moved]
+      service: noop@internal
+      tls:
+        certResolver: default
+    habit-system-fullstack:
+      rule: Host(`habits.ramimaalouf.com`)
+      entryPoints: [web-secure]
+      service: habit-system-fullstack
+      middlewares: [habit-system-headers]
+      tls:
+        certResolver: default
+  services:
+    habit-system-fullstack:
+      loadBalancer:
+        servers:
+          - url: http://172.26.0.1:4411
+        responseForwarding:
+          flushInterval: -1ms
