@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up the complete Eloq deployment
+
+[Service]
+Type=oneshot
+ExecStart=/opt/eloq/backup.sh /var/backups/eloq
+UMask=0077

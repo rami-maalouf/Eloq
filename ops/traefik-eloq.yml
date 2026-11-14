@@ -1,0 +1,23 @@
+# merge these entries into /matrix/traefik/config/provider.yml; keep every other route.
+# back the file up first; never copy an older copy over it (other services share it).
+http:
+  middlewares:
+    eloq-headers:
+      headers:
+        customRequestHeaders:
+          x-snapback-persona: ""
+  routers:
+    eloq:
+      rule: Host(`ELOQ_HOST`)
+      entryPoints: [web-secure]
+      service: eloq
+      middlewares: [eloq-headers]
+      tls:
+        certResolver: default
+  services:
+    eloq:
+      loadBalancer:
+        servers:
+          - url: http://172.26.0.1:4421
+        responseForwarding:
+          flushInterval: -1ms
