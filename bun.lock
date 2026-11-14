@@ -1,0 +1,27 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "eloq",
+      "devDependencies": {
+        "snapback4": "0.4.53",
+      },
+    },
+  },
+  "packages": {
+    "jose": ["jose@6.2.17", "", {}, "sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg=="],
+
+    "oauth4webapi": ["oauth4webapi@3.8.8", "", {}, "sha512-8N28E+a/oxfXWBgOMt+ZP/JUf/XR+IFbvkAEPP3gznXOMv9BpAAwiIj0TFNz3tGTPc0ZQ8zmWBNgN1nAys0gng=="],
+
+    "openid-client": ["openid-client@6.8.8", "", { "dependencies": { "jose": "^6.2.12", "oauth4webapi": "^3.8.8" } }, "sha512-ZsucJA5Ad04Uv7YN4ql+s4GXNmb9uAYQwyJTsJx7CH/MX3JZioLE2pVKi1SC+YrbSLA4Px3Gi30dMjgOZtb6pA=="],
+
+    "snapback4": ["snapback4@0.4.53", "", { "dependencies": { "openid-client": "6.8.8", "undici": "8.12.2" }, "optionalDependencies": { "snapback4-darwin-arm64": "0.4.53", "snapback4-linux-x64": "0.4.53" }, "peerDependencies": { "playwright-core": ">=1.55.1 <2", "react": "^19.0.0" }, "optionalPeers": ["playwright-core", "react"], "bin": { "snapback4": "bin/snapback4.js" } }, "sha512-FWVpDO/drO9+pHraDpUlTTZfY+hDmP4eO5ldVJRpivqAxOgDgM5qsMKiYj2S1xR8QXPZ/jQancxD0t0zFqvO8g=="],
+
+    "snapback4-darwin-arm64": ["snapback4-darwin-arm64@0.4.53", "", { "os": "darwin", "cpu": "arm64" }, "sha512-mI4QJoBRxYPRUufqu5f1gN8jknZRd2gWI2WyMA93Kvh+9yT22FxC1CEOnzb8sIzs9OD9MykILWK9jReCygtrUg=="],
+
+    "snapback4-linux-x64": ["snapback4-linux-x64@0.4.53", "", { "os": "linux", "cpu": "x64" }, "sha512-NabW9IvO1DKk7tj2S3zui0CUuGkdH/KrOhzXBfcZkVZ1A694klpm0odfW+R3PVOdiYsGke8H6j7vn2wcjV+ZVg=="],
+
+    "undici": ["undici@8.12.2", "", {}, "sha512-XtuDWVdqTLr3NAxm2ly9/hU6kUsJOgGh1RASzMBbsw6aWCOaQzHdW+QQDfdERjfJ2V5vL5pRPa4RetO9UfivDg=="],
+  }
+}

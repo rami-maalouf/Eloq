@@ -1,0 +1,19 @@
+[package]
+name = "app-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+exact-logic = { path = "../../../expo-exact-eloq/logic" }
+exact-web = { path = "../../../expo-exact-eloq/host/web" }
+exact-web-capabilities = { path = "../../../expo-exact-eloq/host/web-capabilities" }
+exact-js-web = { path = "../../../expo-exact-eloq/js/web" }
+
+[build-dependencies]
+exact-js-bake = { path = "../../../expo-exact-eloq/js/bake" }

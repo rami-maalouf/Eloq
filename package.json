@@ -1,0 +1,12 @@
+{
+  "name": "eloq",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "backend:check": "snapback4 check",
+    "backend:dev": "snapback4 dev --port 4420"
+  },
+  "devDependencies": {
+    "snapback4": "0.4.53"
+  }
+}

@@ -1,0 +1,28 @@
+// Run `snapback4 dev --port 4420` above; fresh isolates its rows, epoch now dates the tests as the server does.
+fresh
+epoch now
+
+test "a note posts, and another persona sees it"
+  clock data
+  expect text "status" == "Synced"
+  expect tree missing "banner"
+  type "draft" "hello from alice"
+  tap "post"
+  clock data
+  expect text "notice" == "Posted."
+  type "persona" "bob"
+  clock data
+  expect text "latest" == "dev:alice: hello from alice"
+
+test "offline, a note is kept, then delivered on reconnect"
+  clock data
+  fail fetch "backend"
+  type "draft" "from the tunnel"
+  tap "post"
+  clock data
+  expect text "notice" == "Saved on this device; it sends when online."
+  expect text "sending" == "1 sending"
+  pass fetch "backend"
+  clock +5000
+  clock data
+  expect text "sending" == "0 sending"

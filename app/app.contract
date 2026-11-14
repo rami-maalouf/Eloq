@@ -1,0 +1,72 @@
+// App: the view. app.ts answers it through Snapback4 (a guestbook to start from).
+shape Clock
+  epochAtZero: number
+shape Note
+  id: string
+  author: string
+  body: string
+  pending: bool
+shape Board
+  online: bool
+  message: string
+  latest: string
+  sending: number
+  notes: Note[]
+shape Ack
+  ok: bool
+  message: string
+  id: string
+
+component App
+  state persona = "alice"
+  state draft = ""
+  state notice = ""
+  state sampledAt = 0
+  resource time = exactTime() as shape Clock
+  resource board = notes(persona, time.epochAtZero + sampledAt) as shape Board else empty(message="Connecting…")
+  mutation posted as shape Ack queue refreshes board then afterPost
+  derive banner = match failure(board) {
+    case some(f) => (f.code == "offline" || f.code == "E_OFFLINE") ? "You're offline" : f.reason != "" ? `Couldn't load notes (${f.reason})` : `Couldn't load notes (${f.message})`,
+    case none => ""
+  }
+  task live mount
+    every(5000, refreshBoard)
+  action refreshBoard
+    sampledAt = performanceNow()
+    refresh board
+  action choosePersona(value: string)
+    persona = value
+  action editDraft(value: string)
+    draft = value
+  action postNote
+    send posted = post(persona, draft.trim(), time.epochAtZero + performanceNow())
+  action afterPost
+    match posted
+      case some(result)
+        notice = result.message
+        draft = ""
+      case none
+        notice = ""
+  view
+    main testId="root" padding=24
+      column gap=12 max-width=600
+        text "App" role="heading" aria-level=1
+        select value=persona change=choosePersona appearance="auto" testId="persona" aria-label="Signed in as"
+          option value="alice"
+            text "Alice"
+          option value="bob"
+            text "Bob"
+        if banner != ""
+          text banner testId="banner"
+        text (board.online ? "Synced" : board.message) testId="status"
+        text `${board.sending} sending` testId="sending"
+        row gap=8
+          input value=draft input=editDraft testId="draft" placeholder="Say something" aria-label="Note" flex=1
+          button appearance="auto" press=postNote disabled=(draft.trim() == "") testId="post"
+            text "Post"
+        text notice testId="notice"
+        if failed(posted)
+          text (match failure(posted) { case some(f) => f.message, case none => "" }) testId="post-error"
+        text board.latest testId="latest"
+        for note, i in board.notes key=note.id
+          text `${note.author}: ${note.body}${note.pending ? " (sending)" : ""}` testId=`note-${i}`

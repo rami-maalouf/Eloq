@@ -1,0 +1,36 @@
+<!-- exact:begin (exact new writes this block; bun exact.mjs update rewrites it) -->
+# app: an Exact app
+
+`app.contract` is the view, `app.ts` the data module, `app.test.contract` the tests, `app.json`
+the manifest: set `app.name` and `app.id` before building. The app uses Exact at
+`../../expo-exact-eloq` by path (`EXACT` overrides it).
+
+This file is already in your instructions. Start from the nearest pattern: `bun exact.mjs
+pattern` lists them and `pattern <name>` writes one, tested. ../../expo-exact-eloq/docs/start-here-site.md (a site) or
+../../expo-exact-eloq/docs/start-here.md is the only required reading. `bun exact.mjs contract vocab <name>` answers a
+name (none: the card); `bun exact.mjs docs <heading words>` a guide's
+section. Run `bun exact.mjs verify` when the features work, and `verify ios|android` at the end for a
+phone app. When an iPhone app is ready to try, run `bun exact.mjs share` and send its link;
+repeat for each change the person should see. `bun exact.mjs help` lists the verbs, including
+app.json's `"commands"`.
+`bun exact.mjs update` refreshes files. `bun exact.mjs lock` repairs Cargo lock drift.
+`bun exact.mjs update --without linux` stops shipping Linux.
+`bun ../../expo-exact-eloq/scripts/exact.mjs setup --check` names what a native build lacks.
+A backend: this app's data is Snapback 4's (../../expo-exact-eloq/snapback4/README.md). The backend is above it:
+`../snapback/schema.q`, with `snapback4@0.4.33` installed. `app.json` mounts the driver and
+`../snapback/generated`; `app.ts` names and grants its origin. `bun exact.mjs snapback --rebuild` generates operations
+and rebuilds the device, including after exact2 moves; `snapback --port <n>` moves the origin. Start
+`bunx snapback4 dev --port <the origin's port>` above before `test web`. `fresh` resets it per test
+(Snapback4 0.4.33, dev only; a password-only schema's dev needs `--unsafe-dev-doors` for it). Typed reads use `db.read(api.recent, {}, now)`; `send` writes, syncs and answers
+the write's fate. `failure(x).reason` carries a refusal's code. Read the guide before data code.
+
+Generated, so don't edit: `exact.mjs`, `rust-toolchain.toml`, `.cargo/config.toml`,
+`Cargo.toml`'s `[patch.crates-io]` and this block.
+
+## Feedback (required)
+
+When a doc was wrong or missing, a workaround was needed, something took several tries or a
+command confused you, record it: `bun exact.mjs feedback note "<what happened>"`. It attaches
+exact2's commit and the last exit code, never output or code. `bun exact.mjs feedback status` says
+whether notes are sent and whether to keep a diary; under `never`, skip all of this.
+<!-- exact:end -->
