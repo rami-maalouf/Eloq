@@ -1243,6 +1243,7 @@ dependencies = [
 name = "ibex2-sqlite"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "ibex2",
  "rusqlite",
 ]

@@ -4,9 +4,9 @@ import { api } from './backend/api.ts';                 // the backend's generat
 import { buildIndex, normalize, tableForTyping } from './matcher/index.ts'; // the one identity of a term and the typing table (app.json mounts ../packages/matcher/src)
 
 export const appId = 'studio.orbitlabs.eloq.app';         // app.json's "app": { "id" }: change the two together
-// the snapback origin: `bun run backend:dev` beside the app in development; a release bakes
-// its own with EXACT_BACKEND_ORIGIN.
-const origin = 'http://127.0.0.1:4420';
+// the snapback server. development and the tests select the local one (`bun run backend:dev`)
+// through the ignored .exact/backend-origin, or EXACT_BACKEND_ORIGIN at build time.
+const origin = 'https://eloq.orbitlabs.studio';
 // the session lives in the platform's secret store (the keychain on apple). grants are read at
 // build time, so the key is a literal; a development and a release build of the same app id
 // share it, so sign in again after switching between them.
