@@ -1,5 +1,5 @@
 import type { Answer, Result, Sources, Store, Storage } from './app.contract.d.ts';
-import { Snapback, refused, type Sent } from './snapback4/snapback.ts';
+import { Snapback, refused, type Write } from './snapback4/snapback.ts';
 import { api } from './backend/api.ts';                 // the backend's generated operations (app.json mounts ../snapback/generated)
 import { normalize } from './matcher/normalize.ts';     // the one identity of a term (app.json mounts ../packages/matcher/src)
 
@@ -19,15 +19,28 @@ type Reply = Result<'addTerm'>;
 
 const auth = (store: Store, now: number) => ({ store, key: sessionKey, now: Math.floor(now) });
 
-// a client for this app: it restores the stored session and binds that account's partition on
-// this device; opened per source, shared while open, kept on close
+// one client for the account, kept open across answers: it restores the stored session and binds
+// that account's partition on this device. closing it after every answer would retire the
+// partition while another source still reads it.
+let current = auth({} as Store, 0);
+const account = Snapback.switcher(() => ({ app: appId, name: 'account', origin, auth: current }));
+
 async function withClient<T>(store: Store, storage: Storage, native: unknown, now: number,
     work: (db: Snapback) => Promise<T>): Promise<T> {
-  const db = await Snapback.open({ app: appId, name: 'account', origin, storage, native, auth: auth(store, now) } as never);
+  current = auth(store, now);
+  const run = () => account.use('account', storage, native as never, async (db) => {
+    // the held client keeps the secret store and time of the answer that asks
+    if (db.options.auth) Object.assign(db.options.auth, current);
+    return work(db);
+  }, current.now);
   try {
-    return await work(db);
-  } finally {
-    await db.close();
+    return await run();
+  } catch (e) {
+    // the held client's partition belongs to another session than the one stored now (a sign-in
+    // or sign-out through another handle): open a fresh client for the stored session, once
+    if ((e as { code?: string })?.code !== 'E_AUTH') throw e;
+    await account.close(current.now);
+    return run();
   }
 }
 
@@ -39,25 +52,32 @@ const withDevice = <T>(store: Store, storage: Storage, native: unknown, now: num
     return work(db);
   });
 
-// a write's fate as the view's reply: sent, or kept on this device until the next sync
-function ack(fate: Sent<{ id: string } | null>): Reply {
-  if (fate.state === 'failed') throw refused(fate.why);
-  const id = fate.state === 'sent' ? fate.result?.id ?? '' : '';
-  return { ok: true, id, kept: fate.state !== 'sent' };
+// a write as the view's reply. writes only admit: the device keeps and predicts them at once and
+// the mutation's `refreshes lib` syncs. a source never waits on a round, because natively a
+// continuation that resumes on another answer's round cannot reach the device
+// (docs/agent-pitfalls.md, "native call outside an answer").
+function ack(write: Write): Reply {
+  if (write.state === 'failed') throw refused(write.why);
+  return { ok: true, id: write.newIds[0] ?? '', kept: true };
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 const sources: Sources = {
-  restoreAccount: ([now], store, storage, native): Promise<Result<'restoreAccount'>> =>
-    withClient(store, storage, native, now, async (db) => ({ principal: db.session?.principal ?? '' })),
-
-  library: async ([principal, now], store, storage, native): Promise<Result<'library'>> => {
-    if (!principal) return { principal: '', online: false, sending: 0, terms: [], links: [] };
-    return withDevice(store, storage, native, now, async (db) => {
-      if (db.session?.principal !== principal) throw refused({ code: 'E_AUTH', message: 'Sign in again.' });
+  // everything the view shows, in one answer: the signed-in account and its words and links
+  library: ([now], store, storage, native): Promise<Result<'library'>> =>
+    withClient(store, storage, native, now, async (db) => {
+      const principal = db.session?.principal ?? '';
+      const signedOut = { principal: '', online: false, sending: 0, terms: [], links: [] };
+      if (!principal) return signedOut;
+      // the server no longer takes this session (revoked, expired, or the account is gone):
+      // forget it here and show sign-in; what this device keeps stays for that account
       const round = await db.sync();
+      if (round.denied?.code === 'E_AUTH') {
+        await db.logout();
+        return signedOut;
+      }
       const termRows = await db.readAll(api.library, {}, now);
       const linkRows = await db.readAll(api.allLinks, {}, now);
       const terms: Term[] = termRows
@@ -79,15 +99,16 @@ const sources: Sources = {
       }));
       const sending = terms.filter((t) => t.pending).length + links.filter((l) => l.pending).length;
       return { principal, online: round.ok, sending, terms, links };
-    });
-  },
+    }),
 
   signup: ([email, password, now], store, storage, native) => withClient(store, storage, native, now, async (db) => {
+    if (db.session) await db.logout();                   // a leftover session would refuse a new sign-in
     const signed = await db.signup(email, password);
     if (!signed.ok) throw refused(signed.why);
     return { ok: true, id: '', kept: false };
   }),
   login: ([email, password, now], store, storage, native) => withClient(store, storage, native, now, async (db) => {
+    if (db.session) await db.logout();
     const signed = await db.login(email, password);
     if (!signed.ok) throw refused(signed.why);
     return { ok: true, id: '', kept: false };
@@ -98,7 +119,7 @@ const sources: Sources = {
   }),
 
   addTerm: ([word, overused, target, meaning, example, now], store, storage, native) =>
-    withDevice(store, storage, native, now, async (db) => ack(await db.send(api.addTerm, {
+    withDevice(store, storage, native, now, async (db) => ack(await db.write(api.addTerm, {
       text: word.trim(), normalized: normalize(word), overused, target,
       meaning: meaning.trim(), example: example.trim(), notes: '', provenance: 'user',
     }, now))),
@@ -108,7 +129,7 @@ const sources: Sources = {
       const rows = await db.readAll(api.library, {}, now);
       const old = rows.find((t) => t.id === id);
       if (!old) throw refused({ code: 'NOT_FOUND', message: 'That word is gone.' });
-      return ack(await db.send(api.editTerm, {
+      return ack(await db.write(api.editTerm, {
         term: id, text: word.trim(), normalized: normalize(word), forms: list(old.forms), overused, target,
         meaning: meaning.trim(), nuance: nuance.trim(), whenNotToUse: whenNotToUse.trim(),
         example: example.trim(), notes: notes.trim(), contexts: list(old.contexts), tags: list(old.tags),
@@ -116,26 +137,26 @@ const sources: Sources = {
     }),
 
   removeTerm: ([id, now], store, storage, native) =>
-    withDevice(store, storage, native, now, async (db) => ack(await db.send(api.removeTerm, { term: id }, now))),
+    withDevice(store, storage, native, now, async (db) => ack(await db.write(api.removeTerm, { term: id }, now))),
 
   // the view names the target by its normalized text, which a test can know; its id is minted
   addLink: ([from, toNormalized, useWhen, rationale, now], store, storage, native) =>
     withDevice(store, storage, native, now, async (db) => {
       const target = (await db.readAll(api.library, {}, now)).find((t) => t.normalized === toNormalized);
       if (!target) throw refused({ code: 'NOT_FOUND', message: 'That word is gone.' });
-      return ack(await db.send(api.link, {
+      return ack(await db.write(api.link, {
         from, to: target.id, status: 'accepted', origin: 'user', confidence: 100,
         rationale: rationale.trim(), useWhen: useWhen.trim(), caution: '', example: '',
       }, now));
     }),
 
   setLinkStatus: ([id, status, now], store, storage, native) =>
-    withDevice(store, storage, native, now, async (db) => ack(await db.send(api.setLinkStatus, {
+    withDevice(store, storage, native, now, async (db) => ack(await db.write(api.setLinkStatus, {
       link: id, status: status as 'suggested' | 'accepted' | 'dismissed',
     }, now))),
 
   removeLink: ([id, now], store, storage, native) =>
-    withDevice(store, storage, native, now, async (db) => ack(await db.send(api.removeLink, { link: id }, now))),
+    withDevice(store, storage, native, now, async (db) => ack(await db.write(api.removeLink, { link: id }, now))),
 };
 
 export const answer: Answer = (source, args, store, storage, native) =>

@@ -1,7 +1,7 @@
 // Eloq: the words you overuse, the words you want to use, and the moves between them.
 // app.ts answers every read from this device's Snapback partition and syncs it; a write is
 // kept here at once and sent by the next sync, so everything works offline.
-use Badge, EmptyState from "exact:content"
+use EmptyState from "exact:content"
 
 routes nav
   tab library "/"
@@ -13,8 +13,6 @@ routes nav
 
 shape Clock
   epochAtZero: number
-shape Account
-  principal: string
 shape Term
   id: string
   text: string
@@ -62,7 +60,8 @@ fn matches(t: Term, q: string): bool = q.trim() == "" or t.normalized.includes(q
 fn shownBy(t: Term, filter: string): bool = filter == "all" or (filter == "overused" and t.overused) or (filter == "target" and t.target)
 fn movesFrom(links: Link[], id: string): Link[] = links.filter(l => l.from == id and l.status == "accepted")
 fn movesTo(links: Link[], id: string): Link[] = links.filter(l => l.to == id and l.status == "accepted")
-fn subtitle(t: Term, links: Link[]): string = t.overused and movesFrom(links, t.id).length > 0 ? `try ${movesFrom(links, t.id).map(l => l.toText).join(", ")}` : t.meaning
+fn role(t: Term): string = t.overused and t.target ? "Overused and target" : t.overused ? "Overused" : "Target"
+fn subtitle(t: Term, links: Link[]): string = t.overused and movesFrom(links, t.id).length > 0 ? `${role(t)} · try ${movesFrom(links, t.id).map(l => l.toText).join(", ")}` : t.meaning != "" ? `${role(t)} · ${t.meaning}` : role(t)
 fn plural(n: number, one: string, many: string): string = `${n} ${n == 1 ? one : many}`
 
 component App
@@ -83,15 +82,15 @@ component App
   state refusal = ""
   state aimed = ""
   resource time = exactTime() as shape Clock
-  resource account = restoreAccount(time.epochAtZero + sampledAt) as shape Account else empty()
-  resource lib = library(account.principal, time.epochAtZero + sampledAt) when account.principal != "" as shape Library else empty()
-  mutation signed as shape Reply refreshes account, lib
+  resource lib = library() with time.epochAtZero + sampledAt as shape Library else empty()
+  mutation signed as shape Reply refreshes lib
   mutation added as shape Reply queue refreshes lib then afterAdd
   mutation edited as shape Reply queue refreshes lib then afterEdit
   mutation removed as shape Reply queue refreshes lib
   mutation linked as shape Reply queue refreshes lib then afterLink
   mutation reviewed as shape Reply queue refreshes lib
-  derive signedIn = account.principal != ""
+  derive signedIn = lib.principal != ""
+  derive writing = pending(signed) or pending(added) or pending(edited) or pending(removed) or pending(linked) or pending(reviewed)
   derive shown = lib.terms.filter(t => shownBy(t, filter) and matches(t, query))
   derive suggestions = lib.links.filter(l => l.status == "suggested")
   derive targets = lib.terms.filter(t => t.target)
@@ -103,9 +102,9 @@ component App
     every(5000, tick)
 
   action tick
-    sampledAt = performanceNow()
-    refresh account
-    refresh lib
+    if not writing
+      sampledAt = performanceNow()
+      refresh lib
   action editEmail(v: string)
     email = v
   action editPassword(v: string)
@@ -192,27 +191,31 @@ component App
   view
     main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow testId="app" width="100%" height="100%"
       display="flex" flex-direction="column"
-      if not signedIn
+      if not signedIn and pending(lib)
         column flex=1 min-height=0
-          header display="flex" align-items="center" padding="8px 16px"
-            text "Eloq" role="heading" aria-level=1 flex=1
-          list id="sign-in" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
-            section
-              header
-                text "Sign in to keep your words on all your devices"
-              row
-                input value=email input=editEmail type="email" placeholder="Email" aria-label="Email"
-                  autocomplete="email" testId="email" flex=1 min-width=0
-              row
-                input value=password input=editPassword type="password" placeholder="Password" aria-label="Password"
-                  submit=login testId="password" flex=1 min-width=0
-              footer
-                text authError color="-exact-system-red" testId="auth-error"
-            section
-              button press=login disabled=(email.trim() == "" or password == "" or pending(signed)) testId="login"
-                text "Sign In"
-              button press=signup disabled=(email.trim() == "" or password == "" or pending(signed)) testId="signup"
-                text "Create Account"
+      else if not signedIn
+        column flex=1 min-height=0 align-items="center"
+          column flex=1 min-height=0 width="100%" max-width="26.25rem"
+            header display="flex" flex-direction="column" align-items="center" gap=4 padding="48px 16px 8px"
+              h1 "Eloq"
+              text "Trade the words you overuse for the words you mean." color="-exact-secondary-label" text-align="center"
+            list id="sign-in" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+              section
+                header
+                  text "Sign in to keep your words on all your devices"
+                row
+                  input value=email input=editEmail type="email" placeholder="Email" aria-label="Email"
+                    autocomplete="email" testId="email" flex=1 min-width=0
+                row
+                  input value=password input=editPassword type="password" placeholder="Password" aria-label="Password"
+                    submit=login testId="password" flex=1 min-width=0
+                footer
+                  text authError color="-exact-system-red" testId="auth-error"
+              section
+                button press=login disabled=(email.trim() == "" or password == "" or pending(signed)) testId="login"
+                  text "Sign In"
+                button press=signup disabled=(email.trim() == "" or password == "" or pending(signed)) testId="signup"
+                  text "Create Account"
       else
         column flex=1 min-height=0 position="relative"
           for t in nav.tabs key=t.name
@@ -250,13 +253,8 @@ component App
                           for w in shown key=w.id
                             link href=path("term", w.id) delete=remove(w.id) testId=`term-${w.normalized}`
                               column flex=1 min-width=0 gap=2 padding-top=4 padding-bottom=4
-                                text w.text
-                                if subtitle(w, lib.links) != ""
-                                  text subtitle(w, lib.links) font="-exact-subheadline" color="-exact-secondary-label" line-clamp=1
-                              if w.overused
-                                Badge(label="Overused", tint=some("-exact-system-orange"))
-                              if w.target
-                                Badge(label="Target", tint=some("-exact-system-green"))
+                                text w.text line-clamp=1
+                                text subtitle(w, lib.links) font="-exact-subheadline" color="-exact-secondary-label" line-clamp=1
                               image "symbol:forward-chevron"
                           footer
                             text `${plural(shown.length, "word", "words")}${status == "" ? "" : ` · ${status}`}` testId="status"
@@ -280,13 +278,13 @@ component App
                 if e.name == "addTerm"
                   column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="add-form" position="absolute" inset=0
                     header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-                      button press=back aria-label="Cancel" testId="add-cancel"
-                        image "symbol:close"
+                      button id="back" press=back aria-label="Cancel" testId="add-cancel"
+                        text "Cancel"
                       text "New Word" role="heading"
                       button press=add buttonStyle="bordered-prominent" aria-label="Save" testId="add-save"
                         disabled=(addHint != "" or pending(added))
-                        image "symbol:checkmark"
-                    list id="add-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        text "Save"
+                    list id="add-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
                       section
                         row
                           input value=draftText input=editDraftText placeholder="Word or phrase" aria-label="Word or phrase"
@@ -304,26 +302,26 @@ component App
                           text "Meaning"
                         row padding-top=8 padding-bottom=8
                           textarea value=draftMeaning input=editDraftMeaning placeholder="Optional" aria-label="Meaning"
-                            rows=2 testId="add-meaning" flex=1 min-width=0
+                            rows=3 testId="add-meaning" flex=1 min-width=0
                       section
                         header
                           text "Example"
                         row padding-top=8 padding-bottom=8
                           textarea value=draftExample input=editDraftExample placeholder="Optional" aria-label="Example"
-                            rows=2 testId="add-example" flex=1 min-width=0
+                            rows=3 testId="add-example" flex=1 min-width=0
                 if e.name == "editTerm"
                   for w in termOf(lib.terms, e.params.id) key=w.id
                     EditTerm(entry=e.id, term=w, cancel=back, save=save, busy=pending(edited))
                 if e.name == "addLink"
                   column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="link-form" position="absolute" inset=0
                     header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-                      button press=back aria-label="Cancel" testId="link-cancel"
-                        image "symbol:close"
+                      button id="back" press=back aria-label="Cancel" testId="link-cancel"
+                        text "Cancel"
                       text `Instead of “${textOf(lib.terms, e.params.id)}”` role="heading"
                       button press=addLink(e.params.id) buttonStyle="bordered-prominent" aria-label="Save" testId="link-save"
                         disabled=(linkTo == "" or pending(linked))
-                        image "symbol:checkmark"
-                    list id="link-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        text "Save"
+                    list id="link-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
                       section
                         row
                           text "Use"
@@ -338,7 +336,7 @@ component App
                           text "Use it when"
                         row padding-top=8 padding-bottom=8
                           textarea value=linkUseWhen input=editLinkUseWhen placeholder="Optional" aria-label="Use it when"
-                            rows=2 testId="link-use-when" flex=1 min-width=0
+                            rows=3 testId="link-use-when" flex=1 min-width=0
                 if e.name == "inbox"
                   column navigationKey=`${e.id}` navigationScroll="inbox-list" position="absolute" inset=0
                     display="flex" flex-direction="column"
@@ -493,13 +491,13 @@ component EditTerm
   view
     column navigationKey=`${entry}` navigationPresentation="modal" navigationScroll="edit-form" position="absolute" inset=0
       header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-        button press=cancel aria-label="Cancel" testId="edit-cancel"
-          image "symbol:close"
+        button id="back" press=cancel aria-label="Cancel" testId="edit-cancel"
+          text "Cancel"
         text "Edit Word" role="heading"
         button press=submit buttonStyle="bordered-prominent" aria-label="Save" testId="edit-save"
           disabled=(word.trim() == "" or not (overused or target) or busy)
-          image "symbol:checkmark"
-      list id="edit-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+          text "Save"
+      list id="edit-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
         section
           row
             input value=word input=editWord aria-label="Word or phrase" autocapitalize="none" testId="edit-text" flex=1 min-width=0
@@ -513,22 +511,22 @@ component EditTerm
           header
             text "Meaning"
           row padding-top=8 padding-bottom=8
-            textarea value=meaning input=editMeaning aria-label="Meaning" rows=2 testId="edit-meaning" flex=1 min-width=0
+            textarea value=meaning input=editMeaning aria-label="Meaning" rows=3 testId="edit-meaning" flex=1 min-width=0
         section
           header
             text "Nuance"
           row padding-top=8 padding-bottom=8
-            textarea value=nuance input=editNuance aria-label="Nuance" rows=2 flex=1 min-width=0
+            textarea value=nuance input=editNuance aria-label="Nuance" rows=3 flex=1 min-width=0
         section
           header
             text "When not to use it"
           row padding-top=8 padding-bottom=8
-            textarea value=whenNotToUse input=editWhen aria-label="When not to use it" rows=2 flex=1 min-width=0
+            textarea value=whenNotToUse input=editWhen aria-label="When not to use it" rows=3 flex=1 min-width=0
         section
           header
             text "Example"
           row padding-top=8 padding-bottom=8
-            textarea value=example input=editExample aria-label="Example" rows=2 flex=1 min-width=0
+            textarea value=example input=editExample aria-label="Example" rows=3 flex=1 min-width=0
         section
           header
             text "Notes"
