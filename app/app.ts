@@ -1,7 +1,7 @@
 import type { Answer, Result, Sources, Store, Storage } from './app.contract.d.ts';
 import { Snapback, refused, type Write } from './snapback4/snapback.ts';
 import { api } from './backend/api.ts';                 // the backend's generated operations (app.json mounts ../snapback/generated)
-import { normalize } from './matcher/normalize.ts';     // the one identity of a term (app.json mounts ../packages/matcher/src)
+import { buildIndex, normalize, tableForTyping } from './matcher/index.ts'; // the one identity of a term and the typing table (app.json mounts ../packages/matcher/src)
 
 export const appId = 'studio.orbitlabs.eloq.app';         // app.json's "app": { "id" }: change the two together
 // the snapback origin: `bun run backend:dev` beside the app in development; a release bakes
@@ -11,7 +11,7 @@ const origin = 'http://127.0.0.1:4420';
 // build time, so the key is a literal; a development and a release build of the same app id
 // share it, so sign in again after switching between them.
 const sessionKey = 'eloq-session';
-export const grants = `net.fetch ${origin}\nsqlite.open app:/data\nsecret.keep ${sessionKey}`;
+export const grants = `net.fetch ${origin}\nsqlite.open app:/data\nsecret.keep ${sessionKey}\nfs.write app:/data/snapshot.json`;
 
 type Term = Result<'library'>['terms'][number];
 type Link = Result<'library'>['links'][number];
@@ -62,6 +62,39 @@ function ack(write: Write): Reply {
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+// app:/data/snapshot.json: what other programs on this mac read without the app's database: the
+// old eloq app's snapshot (version 1) for the browser extension and obsidian plugin, plus the
+// typing table for the typing overlay. written only when it changes.
+let lastExport = '';
+async function exportSnapshot(storage: Storage, terms: Term[], links: Link[], now: number) {
+  const roles = (t: Term) => [...(t.overused ? ['overused'] : []), ...(t.target ? ['underused'] : [])];
+  const words = terms.map((t) => ({
+    id: t.id, displayTerm: t.text, normalizedTerm: t.normalized, roles: roles(t), notes: t.notes,
+    contexts: t.contexts, exampleUsage: t.example, provenance: t.provenance, sourceExcerpt: '',
+  }));
+  const connections = links.map((l) => ({
+    id: l.id, overusedWordID: l.from, overusedTerm: l.fromText, underusedWordID: l.to, underusedTerm: l.toText,
+    origin: l.origin, status: l.status, rationale: l.rationale, useWhen: l.useWhen, caution: l.caution,
+    sourceExcerpt: '', exampleUsage: l.example, confidence: l.confidence / 100,
+  }));
+  const count = (s: string) => links.filter((l) => l.status === s).length;
+  const body = {
+    version: 1,
+    summary: {
+      totalWords: terms.length, overusedWords: terms.filter((t) => t.overused).length,
+      underusedWords: terms.filter((t) => t.target).length, acceptedConnections: count('accepted'),
+      suggestedConnections: count('suggested'), dismissedConnections: count('dismissed'),
+    },
+    words, connections,
+    typing: tableForTyping(buildIndex(terms.filter((t) => t.overused).map((t) => ({ id: t.id, text: t.text, forms: t.forms })))),
+  };
+  const key = JSON.stringify(body);
+  if (key === lastExport) return;
+  const text = JSON.stringify({ ...body, generatedAt: new Date(Math.floor(now)).toISOString() }, null, 1);
+  await storage.fs.atomicWriteFile('app:/data/snapshot.json', new TextEncoder().encode(text));
+  lastExport = key;
+}
 
 // a day as YYYY-MM-DD in utc, and the monday that starts its week
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -137,6 +170,7 @@ const sources: Sources = {
       }));
       const sending = terms.filter((t) => t.pending).length + links.filter((l) => l.pending).length;
       const { stats, weeks, spokenWords } = await progress(db, terms, now);
+      await exportSnapshot(storage, terms, links, now);
       return { principal, online: round.ok, sending, terms, links, stats, weeks, spokenWords };
     }),
 
