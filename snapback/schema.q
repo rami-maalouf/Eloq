@@ -183,3 +183,24 @@ invariant terms.read only .owner = viewer
 invariant links.read only .owner = viewer
 invariant usage.read only .owner = viewer
 invariant scans.read only .owner = viewer
+
+-- every field at once: the one-time import and agents (through the mcp server) write with these.
+mutation importTerm(text: text 1..120, normalized: text 1..120, forms: [text 1..120] <=20,
+    overused: bool, target: bool, meaning: text <=2000, nuance: text <=2000,
+    whenNotToUse: text <=2000, example: text <=2000, notes: text <=4000,
+    contexts: [text 1..40] <=12, tags: [text 1..40] <=20,
+    provenance: enum('user', 'ai', 'agent', 'import_notion', 'import_eloq1', 'import_vocab_enhancer'),
+    sourceExcerpt: text <=4000, externalIds: [text 1..160] <=8):
+  return insert terms { owner: viewer, text, normalized, forms, overused, target, meaning, nuance,
+    whenNotToUse, example, notes, contexts, tags, provenance, sourceExcerpt, externalIds }
+
+mutation importLink(from: terms, to: terms, status: enum('suggested', 'accepted', 'dismissed'),
+    origin: enum('user', 'ai', 'agent', 'import'), confidence: int 0..100,
+    rationale: text <=2000, useWhen: text <=2000, caution: text <=2000, example: text <=2000,
+    sourceExcerpt: text <=4000, externalIds: [text 1..160] <=8):
+  f = terms[from] ! else NOT_FOUND
+  t = terms[to] ! else NOT_FOUND
+  require f.owner = viewer and t.owner = viewer else NOT_FOUND
+  require from != to else SAME_TERM
+  return insert links { owner: viewer, from, to, status, origin, confidence, rationale, useWhen,
+    caution, example, sourceExcerpt, externalIds }

@@ -2,6 +2,6 @@ node_modules/
 # snapback's local dev store and generated client: built by `snapback4 check` / `dev`, never committed
 .snapback4/
 snapback/generated/
-# one-time import inputs (personal data)
-scripts/import/data/
+# the one-time import: its inputs, its plan and its fix rules name personal vocabulary
+scripts/import/
 .DS_Store
