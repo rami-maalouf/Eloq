@@ -1,21 +1,21 @@
 {
   "$schema": "../../expo-exact-eloq/scripts/app.schema.json",
-  "name": "App",
-  "short_name": "App",
-  "id": "com.example.app-802a7b",
+  "name": "Eloq",
+  "short_name": "Eloq",
+  "id": "studio.orbitlabs.eloq.app",
   "start_url": "/",
   "display": "standalone",
   "app": {
-    "id": "com.example.app-802a7b",
-    "name": "App"
+    "id": "studio.orbitlabs.eloq.app",
+    "name": "Eloq"
   },
   "host": {
     "web": {},
     "macos": {
       "minimumOS": "14.0",
       "window": {
-        "width": 900,
-        "height": 700
+        "width": 1000,
+        "height": 720
       }
     }
   },
@@ -28,7 +28,8 @@
   "typescript": {
     "sources": {
       "snapback4": "../../expo-exact-eloq/snapback4/ts",
-      "backend": "../snapback/generated"
+      "backend": "../snapback/generated",
+      "matcher": "../packages/matcher/src"
     }
   }
 }

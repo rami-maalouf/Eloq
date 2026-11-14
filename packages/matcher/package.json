@@ -1,0 +1,7 @@
+{
+  "name": "@eloq/matcher",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "bun test" }
+}

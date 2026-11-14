@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "backend:check": "snapback4 check",
-    "backend:dev": "snapback4 dev --port 4420"
+    "backend:dev": "snapback4 dev --port 4420 --unsafe-dev-doors"
   },
   "devDependencies": {
     "snapback4": "0.4.53"

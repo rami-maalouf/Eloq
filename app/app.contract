@@ -1,72 +1,536 @@
-// App: the view. app.ts answers it through Snapback4 (a guestbook to start from).
+// Eloq: the words you overuse, the words you want to use, and the moves between them.
+// app.ts answers every read from this device's Snapback partition and syncs it; a write is
+// kept here at once and sent by the next sync, so everything works offline.
+use Badge, EmptyState from "exact:content"
+
+routes nav
+  tab library "/"
+    term "/term/:id"
+    addTerm "/add"
+    editTerm "/term/:id/edit"
+    addLink "/term/:id/link"
+  tab inbox "/inbox"
+
 shape Clock
   epochAtZero: number
-shape Note
+shape Account
+  principal: string
+shape Term
   id: string
-  author: string
-  body: string
+  text: string
+  normalized: string
+  overused: bool
+  target: bool
+  meaning: string
+  nuance: string
+  whenNotToUse: string
+  example: string
+  notes: string
+  forms: string[]
+  contexts: string[]
+  tags: string[]
+  provenance: string
   pending: bool
-shape Board
-  online: bool
-  message: string
-  latest: string
-  sending: number
-  notes: Note[]
-shape Ack
-  ok: bool
-  message: string
+shape Link
   id: string
+  from: string
+  to: string
+  fromText: string
+  toText: string
+  status: string
+  origin: string
+  confidence: number
+  rationale: string
+  useWhen: string
+  caution: string
+  example: string
+  pending: bool
+shape Library
+  principal: string
+  online: bool
+  sending: number
+  terms: Term[]
+  links: Link[]
+shape Reply
+  ok: bool
+  id: string
+  kept: bool
+
+fn termOf(terms: Term[], id: string): Term[] = terms.filter(t => t.id == id)
+fn textOf(terms: Term[], id: string): string = match first(terms.filter(t => t.id == id)) { case some(t) => t.text, case none => "" }
+fn matches(t: Term, q: string): bool = q.trim() == "" or t.normalized.includes(q.trim().toLowerCase()) or t.meaning.toLowerCase().includes(q.trim().toLowerCase())
+fn shownBy(t: Term, filter: string): bool = filter == "all" or (filter == "overused" and t.overused) or (filter == "target" and t.target)
+fn movesFrom(links: Link[], id: string): Link[] = links.filter(l => l.from == id and l.status == "accepted")
+fn movesTo(links: Link[], id: string): Link[] = links.filter(l => l.to == id and l.status == "accepted")
+fn subtitle(t: Term, links: Link[]): string = t.overused and movesFrom(links, t.id).length > 0 ? `try ${movesFrom(links, t.id).map(l => l.toText).join(", ")}` : t.meaning
+fn plural(n: number, one: string, many: string): string = `${n} ${n == 1 ? one : many}`
 
 component App
-  state persona = "alice"
-  state draft = ""
-  state notice = ""
+  state email = ""
+  state password = ""
+  state query = ""
+  state filter = "all" persist
   state sampledAt = 0
+  // the add sheet's draft
+  state draftText = ""
+  state draftOverused = true
+  state draftTarget = false
+  state draftMeaning = ""
+  state draftExample = ""
+  // the link sheet's draft
+  state linkTo = ""
+  state linkUseWhen = ""
+  state refusal = ""
+  state aimed = ""
   resource time = exactTime() as shape Clock
-  resource board = notes(persona, time.epochAtZero + sampledAt) as shape Board else empty(message="Connecting…")
-  mutation posted as shape Ack queue refreshes board then afterPost
-  derive banner = match failure(board) {
-    case some(f) => (f.code == "offline" || f.code == "E_OFFLINE") ? "You're offline" : f.reason != "" ? `Couldn't load notes (${f.reason})` : `Couldn't load notes (${f.message})`,
-    case none => ""
-  }
+  resource account = restoreAccount(time.epochAtZero + sampledAt) as shape Account else empty()
+  resource lib = library(account.principal, time.epochAtZero + sampledAt) when account.principal != "" as shape Library else empty()
+  mutation signed as shape Reply refreshes account, lib
+  mutation added as shape Reply queue refreshes lib then afterAdd
+  mutation edited as shape Reply queue refreshes lib then afterEdit
+  mutation removed as shape Reply queue refreshes lib
+  mutation linked as shape Reply queue refreshes lib then afterLink
+  mutation reviewed as shape Reply queue refreshes lib
+  derive signedIn = account.principal != ""
+  derive shown = lib.terms.filter(t => shownBy(t, filter) and matches(t, query))
+  derive suggestions = lib.links.filter(l => l.status == "suggested")
+  derive targets = lib.terms.filter(t => t.target)
+  derive selected = match stack(nav).filter(e => e.name == "term" or e.name == "editTerm" or e.name == "addLink").at(-1) { case some(e) => e.params.id, case none => "" }
+  derive authError = match failure(signed) { case some(f) => (f.code == "E_AUTH" ? "That email and password don’t match." : f.reason != "" ? f.reason : f.message), case none => "" }
+  derive status = pending(lib) and lib.principal == "" ? "" : lib.sending > 0 ? `${plural(lib.sending, "change", "changes")} waiting to sync` : lib.online ? "Synced" : "Offline: changes sync when you’re back online"
+  derive addHint = draftText.trim() == "" ? "Enter a word or phrase." : not draftOverused and not draftTarget ? "Mark it overused, a target, or both." : ""
   task live mount
-    every(5000, refreshBoard)
-  action refreshBoard
+    every(5000, tick)
+
+  action tick
     sampledAt = performanceNow()
-    refresh board
-  action choosePersona(value: string)
-    persona = value
-  action editDraft(value: string)
-    draft = value
-  action postNote
-    send posted = post(persona, draft.trim(), time.epochAtZero + performanceNow())
-  action afterPost
-    match posted
-      case some(result)
-        notice = result.message
-        draft = ""
-      case none
-        notice = ""
+    refresh account
+    refresh lib
+  action editEmail(v: string)
+    email = v
+  action editPassword(v: string)
+    password = v
+  action signup
+    send signed = signup(email.trim(), password, time.epochAtZero + performanceNow())
+  action login
+    send signed = login(email.trim(), password, time.epochAtZero + performanceNow())
+  action logout
+    send signed = logout(time.epochAtZero + performanceNow())
+  action pick(name: string)
+    nav = select(nav, name)
+  action follow(url: string)
+    nav = top(nav).name == "term" and url.startsWith("/term/") and not url.endsWith("/edit") and not url.endsWith("/link") ? replace(nav, url) : go(nav, url)
+  action back
+    nav = back(nav)
+  action search(v: string)
+    query = v
+  action choose(f: string)
+    filter = f
+
+  action openAdd
+    draftText = query.trim()
+    draftOverused = filter != "target"
+    draftTarget = filter == "target"
+    draftMeaning = ""
+    draftExample = ""
+    refusal = ""
+    nav = push(nav, "/add")
+  action editDraftText(v: string)
+    draftText = v
+  action setDraftOverused(on: bool)
+    draftOverused = on
+  action setDraftTarget(on: bool)
+    draftTarget = on
+  action editDraftMeaning(v: string)
+    draftMeaning = v
+  action editDraftExample(v: string)
+    draftExample = v
+  action add
+    if addHint == "" and not pending(added)
+      send added = addTerm(draftText, draftOverused, draftTarget, draftMeaning, draftExample, time.epochAtZero + performanceNow())
+  action afterAdd
+    refusal = ""
+    if top(nav).name == "addTerm"
+      nav = back(nav)
+
+  action save(id: string, word: string, overused: bool, target: bool, meaning: string, nuance: string, whenNotToUse: string, example: string, notes: string)
+    send edited = editTerm(id, word, overused, target, meaning, nuance, whenNotToUse, example, notes, time.epochAtZero + performanceNow())
+  action afterEdit
+    if top(nav).name == "editTerm"
+      nav = back(nav)
+
+  action askRemove(id: string)
+    aimed = id
+    showModal("remove")
+  action remove(id: string)
+    send removed = removeTerm(id, time.epochAtZero + performanceNow())
+    if selected == id
+      nav = back(nav)
+
+  action openLink(id: string)
+    linkTo = ""
+    linkUseWhen = ""
+    nav = push(nav, path("addLink", id))
+  action chooseTarget(v: string)
+    linkTo = v
+  action editLinkUseWhen(v: string)
+    linkUseWhen = v
+  action addLink(from: string)
+    if linkTo != "" and not pending(linked)
+      send linked = addLink(from, linkTo, linkUseWhen, "", time.epochAtZero + performanceNow())
+  action afterLink
+    if top(nav).name == "addLink"
+      nav = back(nav)
+
+  action accept(id: string)
+    send reviewed = setLinkStatus(id, "accepted", time.epochAtZero + performanceNow())
+  action dismiss(id: string)
+    send reviewed = setLinkStatus(id, "dismissed", time.epochAtZero + performanceNow())
+  action unlink(id: string)
+    send reviewed = removeLink(id, time.epochAtZero + performanceNow())
+
   view
-    main testId="root" padding=24
-      column gap=12 max-width=600
-        text "App" role="heading" aria-level=1
-        select value=persona change=choosePersona appearance="auto" testId="persona" aria-label="Signed in as"
-          option value="alice"
-            text "Alice"
-          option value="bob"
-            text "Bob"
-        if banner != ""
-          text banner testId="banner"
-        text (board.online ? "Synced" : board.message) testId="status"
-        text `${board.sending} sending` testId="sending"
-        row gap=8
-          input value=draft input=editDraft testId="draft" placeholder="Say something" aria-label="Note" flex=1
-          button appearance="auto" press=postNote disabled=(draft.trim() == "") testId="post"
-            text "Post"
-        text notice testId="notice"
-        if failed(posted)
-          text (match failure(posted) { case some(f) => f.message, case none => "" }) testId="post-error"
-        text board.latest testId="latest"
-        for note, i in board.notes key=note.id
-          text `${note.author}: ${note.body}${note.pending ? " (sending)" : ""}` testId=`note-${i}`
+    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow testId="app" width="100%" height="100%"
+      display="flex" flex-direction="column"
+      if not signedIn
+        column flex=1 min-height=0
+          header display="flex" align-items="center" padding="8px 16px"
+            text "Eloq" role="heading" aria-level=1 flex=1
+          list id="sign-in" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+            section
+              header
+                text "Sign in to keep your words on all your devices"
+              row
+                input value=email input=editEmail type="email" placeholder="Email" aria-label="Email"
+                  autocomplete="email" testId="email" flex=1 min-width=0
+              row
+                input value=password input=editPassword type="password" placeholder="Password" aria-label="Password"
+                  submit=login testId="password" flex=1 min-width=0
+              footer
+                text authError color="-exact-system-red" testId="auth-error"
+            section
+              button press=login disabled=(email.trim() == "" or password == "" or pending(signed)) testId="login"
+                text "Sign In"
+              button press=signup disabled=(email.trim() == "" or password == "" or pending(signed)) testId="signup"
+                text "Create Account"
+      else
+        column flex=1 min-height=0 position="relative"
+          for t in nav.tabs key=t.name
+            column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
+              for e in t.stack key=e.id
+                if e.name == "library"
+                  column navigationKey=`${e.id}` navigationScroll="terms" position="absolute" inset=0
+                    display="flex" flex-direction="column"
+                    header display="flex" flex-wrap="wrap" align-items="center" gap=8 padding="8px 16px"
+                      text "Library" role="heading" aria-level=1 flex=1
+                      button press=openAdd aria-label="Add Word" testId="add-term"
+                        image "symbol:add"
+                      input type="search" value=query input=search placeholder="Search" aria-label="Search Words"
+                        testId="search" width="100%"
+                    row role="radiogroup" aria-label="Show" padding="0 16px 8px" testId="filter"
+                      button role="radio" aria-checked=(filter == "all") press=choose("all") testId="filter-all" flex=1
+                        text "All"
+                      button role="radio" aria-checked=(filter == "overused") press=choose("overused") testId="filter-overused" flex=1
+                        text "Overused"
+                      button role="radio" aria-checked=(filter == "target") press=choose("target") testId="filter-target" flex=1
+                        text "Targets"
+                    if failed(lib) and lib.principal == ""
+                      EmptyState(symbol="symbol:alert", title="Can’t Open Your Library", message="Check your connection; your words sync once this device has them.")
+                        button press=tick testId="retry"
+                          text "Try Again"
+                    else if lib.terms.length == 0 and not pending(lib)
+                      EmptyState(symbol="symbol:book", title="No Words Yet", message="Add a word you overuse, or one you want to use more.")
+                        button press=openAdd testId="empty-add"
+                          text "Add Word"
+                    else if shown.length == 0 and not pending(lib)
+                      EmptyState(symbol="symbol:search", title=(query.trim() == "" ? "Nothing Here Yet" : `No Results for “${query.trim()}”`), message="Try another search or filter.")
+                    else
+                      list id="terms" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        section
+                          for w in shown key=w.id
+                            link href=path("term", w.id) delete=remove(w.id) testId=`term-${w.normalized}`
+                              column flex=1 min-width=0 gap=2 padding-top=4 padding-bottom=4
+                                text w.text
+                                if subtitle(w, lib.links) != ""
+                                  text subtitle(w, lib.links) font="-exact-subheadline" color="-exact-secondary-label" line-clamp=1
+                              if w.overused
+                                Badge(label="Overused", tint=some("-exact-system-orange"))
+                              if w.target
+                                Badge(label="Target", tint=some("-exact-system-green"))
+                              image "symbol:forward-chevron"
+                          footer
+                            text `${plural(shown.length, "word", "words")}${status == "" ? "" : ` · ${status}`}` testId="status"
+                if e.name == "term"
+                  column navigationKey=`${e.id}` navigationScroll="term-detail" position="absolute" inset=0
+                    display="flex" flex-direction="column"
+                    header display="flex" align-items="center" gap=8 padding="8px 16px"
+                      text (textOf(lib.terms, e.params.id) == "" ? "Not Found" : textOf(lib.terms, e.params.id)) role="heading" aria-level=2 flex=1 testId="detail-title"
+                      if termOf(lib.terms, e.params.id).length > 0
+                        link href=path("editTerm", e.params.id) aria-label="Edit" testId="edit-term"
+                          text "Edit"
+                    if termOf(lib.terms, e.params.id).length > 0
+                      list id="term-detail" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        for w in termOf(lib.terms, e.params.id) key=w.id
+                          TermSections(term=w, from=movesFrom(lib.links, w.id), to=movesTo(lib.links, w.id),
+                            openLink=openLink(w.id), unlink=unlink, askRemove=askRemove(w.id))
+                    else if not pending(lib)
+                      EmptyState(symbol="symbol:alert", title="No Such Word", message="It may have been deleted on another device.")
+                        button press=back buttonStyle="filled" testId="missing-back"
+                          text "Back to Library"
+                if e.name == "addTerm"
+                  column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="add-form" position="absolute" inset=0
+                    header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+                      button press=back aria-label="Cancel" testId="add-cancel"
+                        image "symbol:close"
+                      text "New Word" role="heading"
+                      button press=add buttonStyle="bordered-prominent" aria-label="Save" testId="add-save"
+                        disabled=(addHint != "" or pending(added))
+                        image "symbol:checkmark"
+                    list id="add-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                      section
+                        row
+                          input value=draftText input=editDraftText placeholder="Word or phrase" aria-label="Word or phrase"
+                            autofocus=true submit=add autocapitalize="none" testId="add-text" flex=1 min-width=0
+                        row
+                          text "I overuse it"
+                          input type="checkbox" switch checked=draftOverused change=setDraftOverused aria-label="I overuse it" testId="add-overused"
+                        row
+                          text "I want to use it"
+                          input type="checkbox" switch checked=draftTarget change=setDraftTarget aria-label="I want to use it" testId="add-target"
+                        footer
+                          text (match failure(added) { case some(f) => (f.code == "TERM_EXISTS" ? "That word is already in your library." : f.message), case none => addHint }) testId="add-hint"
+                      section
+                        header
+                          text "Meaning"
+                        row padding-top=8 padding-bottom=8
+                          textarea value=draftMeaning input=editDraftMeaning placeholder="Optional" aria-label="Meaning"
+                            rows=2 testId="add-meaning" flex=1 min-width=0
+                      section
+                        header
+                          text "Example"
+                        row padding-top=8 padding-bottom=8
+                          textarea value=draftExample input=editDraftExample placeholder="Optional" aria-label="Example"
+                            rows=2 testId="add-example" flex=1 min-width=0
+                if e.name == "editTerm"
+                  for w in termOf(lib.terms, e.params.id) key=w.id
+                    EditTerm(entry=e.id, term=w, cancel=back, save=save, busy=pending(edited))
+                if e.name == "addLink"
+                  column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="link-form" position="absolute" inset=0
+                    header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+                      button press=back aria-label="Cancel" testId="link-cancel"
+                        image "symbol:close"
+                      text `Instead of “${textOf(lib.terms, e.params.id)}”` role="heading"
+                      button press=addLink(e.params.id) buttonStyle="bordered-prominent" aria-label="Save" testId="link-save"
+                        disabled=(linkTo == "" or pending(linked))
+                        image "symbol:checkmark"
+                    list id="link-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                      section
+                        row
+                          text "Use"
+                          select value=linkTo change=chooseTarget aria-label="Target word" testId="link-to"
+                            option "Choose a word" value=""
+                            for w in targets.filter(x => x.id != e.params.id) key=w.id
+                              option w.text value=w.normalized
+                        footer
+                          text (match failure(linked) { case some(f) => (f.code == "LINK_EXISTS" ? "Those two words are already linked." : f.message), case none => (targets.length == 0 ? "Mark a word as a target first." : "") }) testId="link-hint"
+                      section
+                        header
+                          text "Use it when"
+                        row padding-top=8 padding-bottom=8
+                          textarea value=linkUseWhen input=editLinkUseWhen placeholder="Optional" aria-label="Use it when"
+                            rows=2 testId="link-use-when" flex=1 min-width=0
+                if e.name == "inbox"
+                  column navigationKey=`${e.id}` navigationScroll="inbox-list" position="absolute" inset=0
+                    display="flex" flex-direction="column"
+                    header display="flex" align-items="center" padding="8px 16px"
+                      text "Inbox" role="heading" aria-level=1 flex=1
+                    if suggestions.length == 0
+                      EmptyState(symbol="symbol:sparkles", title="Nothing to Review", message="Suggested moves from Claude and your agents appear here.")
+                    else
+                      list id="inbox-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                        for s, i in suggestions key=s.id
+                          section
+                            row
+                              column flex=1 min-width=0 gap=2
+                                text `${s.fromText} → ${s.toText}` testId=`suggestion-${i}`
+                                if s.rationale != ""
+                                  text s.rationale font="-exact-subheadline" color="-exact-secondary-label"
+                                if s.useWhen != ""
+                                  text `Use when: ${s.useWhen}` font="-exact-footnote" color="-exact-secondary-label"
+                                if s.caution != ""
+                                  text `Careful: ${s.caution}` font="-exact-footnote" color="-exact-secondary-label"
+                            row gap=8
+                              button press=accept(s.id) buttonStyle="filled" disabled=pending(reviewed) testId=`accept-${i}` flex=1
+                                text "Accept"
+                              button press=dismiss(s.id) buttonStyle="bordered" disabled=pending(reviewed) testId=`dismiss-${i}` flex=1
+                                text "Dismiss"
+        row role="tablist" testId="tabs"
+          button role="tab" aria-controls="panel-library" aria-selected=(nav.tab == "library") press=pick("library")
+            testId="tab-library" flex=1
+            image "symbol:book"
+            text "Library"
+          button role="tab" aria-controls="panel-inbox" aria-selected=(nav.tab == "inbox") press=pick("inbox")
+            testId="tab-inbox" flex=1
+            image "symbol:sparkles"
+            text "Inbox"
+            if suggestions.length > 0
+              row background-color="-exact-system-red" border-radius=12
+                text `${suggestions.length}` font-variant-numeric="tabular-nums"
+      dialog id="remove" role="alertdialog" aria-label=`Delete “${textOf(lib.terms, aimed)}”?`
+        text "Its links go with it. This can’t be undone."
+        button press=remove(aimed) destructive=true commandfor="remove" command="close" testId="remove-confirm"
+          text "Delete"
+        button commandfor="remove" command="close" testId="remove-cancel"
+          text "Cancel"
+
+// one word: what it means, how to use it, and where to move from or to it
+component TermSections
+  props
+    term: Term
+    from: Link[]
+    to: Link[]
+    openLink: action
+    unlink: action
+    askRemove: action
+  view
+    section
+      row
+        text "Overused"
+        text (term.overused ? "Yes" : "No") testId="detail-overused"
+      row
+        text "Target"
+        text (term.target ? "Yes" : "No") testId="detail-target"
+    if term.meaning != ""
+      section
+        header
+          text "Meaning"
+        row padding-top=10 padding-bottom=10
+          text term.meaning flex=1 min-width=0 testId="detail-meaning"
+    if term.nuance != ""
+      section
+        header
+          text "Nuance"
+        row padding-top=10 padding-bottom=10
+          text term.nuance flex=1 min-width=0
+    if term.whenNotToUse != ""
+      section
+        header
+          text "When not to use it"
+        row padding-top=10 padding-bottom=10
+          text term.whenNotToUse flex=1 min-width=0
+    if term.example != ""
+      section
+        header
+          text "Example"
+        row padding-top=10 padding-bottom=10
+          text term.example flex=1 min-width=0 font-style="italic"
+    if term.overused
+      section
+        header
+          text "Use instead"
+        for l, i in from key=l.id
+          row delete=unlink(l.id)
+            column flex=1 min-width=0 gap=2 padding-top=4 padding-bottom=4
+              text l.toText testId=`move-${i}`
+              if l.useWhen != ""
+                text l.useWhen font="-exact-subheadline" color="-exact-secondary-label"
+              if l.caution != ""
+                text `Careful: ${l.caution}` font="-exact-footnote" color="-exact-secondary-label"
+        button press=openLink testId="add-link"
+          text "Add a Word to Use Instead"
+    if to.length > 0
+      section
+        header
+          text "Use it instead of"
+        for l in to key=l.id
+          row
+            text l.fromText
+    if term.notes != ""
+      section
+        header
+          text "Notes"
+        row padding-top=10 padding-bottom=10
+          text term.notes flex=1 min-width=0
+    section
+      button press=askRemove destructive=true testId="delete-term"
+        text "Delete Word"
+
+// the edit sheet: its fields start from the word it opened on
+component EditTerm
+  props
+    entry: number
+    term: Term
+    cancel: action
+    save: action
+    busy: bool
+  state word = term.text
+  state overused = term.overused
+  state target = term.target
+  state meaning = term.meaning
+  state nuance = term.nuance
+  state whenNotToUse = term.whenNotToUse
+  state example = term.example
+  state notes = term.notes
+  action editWord(v: string)
+    word = v
+  action setOverused(on: bool)
+    overused = on
+  action setTarget(on: bool)
+    target = on
+  action editMeaning(v: string)
+    meaning = v
+  action editNuance(v: string)
+    nuance = v
+  action editWhen(v: string)
+    whenNotToUse = v
+  action editExample(v: string)
+    example = v
+  action editNotes(v: string)
+    notes = v
+  action submit
+    if word.trim() != "" and (overused or target) and not busy
+      save(term.id, word, overused, target, meaning, nuance, whenNotToUse, example, notes)
+  view
+    column navigationKey=`${entry}` navigationPresentation="modal" navigationScroll="edit-form" position="absolute" inset=0
+      header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+        button press=cancel aria-label="Cancel" testId="edit-cancel"
+          image "symbol:close"
+        text "Edit Word" role="heading"
+        button press=submit buttonStyle="bordered-prominent" aria-label="Save" testId="edit-save"
+          disabled=(word.trim() == "" or not (overused or target) or busy)
+          image "symbol:checkmark"
+      list id="edit-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+        section
+          row
+            input value=word input=editWord aria-label="Word or phrase" autocapitalize="none" testId="edit-text" flex=1 min-width=0
+          row
+            text "I overuse it"
+            input type="checkbox" switch checked=overused change=setOverused aria-label="I overuse it" testId="edit-overused"
+          row
+            text "I want to use it"
+            input type="checkbox" switch checked=target change=setTarget aria-label="I want to use it" testId="edit-target"
+        section
+          header
+            text "Meaning"
+          row padding-top=8 padding-bottom=8
+            textarea value=meaning input=editMeaning aria-label="Meaning" rows=2 testId="edit-meaning" flex=1 min-width=0
+        section
+          header
+            text "Nuance"
+          row padding-top=8 padding-bottom=8
+            textarea value=nuance input=editNuance aria-label="Nuance" rows=2 flex=1 min-width=0
+        section
+          header
+            text "When not to use it"
+          row padding-top=8 padding-bottom=8
+            textarea value=whenNotToUse input=editWhen aria-label="When not to use it" rows=2 flex=1 min-width=0
+        section
+          header
+            text "Example"
+          row padding-top=8 padding-bottom=8
+            textarea value=example input=editExample aria-label="Example" rows=2 flex=1 min-width=0
+        section
+          header
+            text "Notes"
+          row padding-top=8 padding-bottom=8
+            textarea value=notes input=editNotes aria-label="Notes" rows=3 flex=1 min-width=0
