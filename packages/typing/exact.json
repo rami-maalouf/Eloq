@@ -2,17 +2,26 @@
   "kind": "interface",
   "name": "@eloq/typing",
   "version": "1.0.0",
+  "start": "load",
   "shapes": {
     "TypingStatus": {
       "available": "bool",
       "trusted": "bool",
       "running": "bool",
-      "words": "number"
+      "words": "number",
+      "underlines": "bool"
     },
     "TypingMove": {
       "kind": "string",
       "term": "string",
       "replacement": "string",
+      "app": "string"
+    },
+    "TypingCapture": {
+      "kind": "string",
+      "text": "string",
+      "overused": "bool",
+      "target": "bool",
       "app": "string"
     }
   },
@@ -22,7 +31,7 @@
       "live": true,
       "answers": "TypingStatus",
       "substitute": {
-        "default": { "available": false, "trusted": false, "running": false, "words": 0 },
+        "default": { "available": false, "trusted": false, "running": false, "words": 0, "underlines": false },
         "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
       }
     },
@@ -32,7 +41,17 @@
       "options": { "table": "string" },
       "answers": "TypingStatus",
       "substitute": {
-        "default": { "available": false, "trusted": false, "running": false, "words": 0 },
+        "default": { "available": false, "trusted": false, "running": false, "words": 0, "underlines": false },
+        "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
+      }
+    },
+    {
+      "send": "setUnderlines",
+      "origin": "app",
+      "options": { "on": "bool" },
+      "answers": "TypingStatus",
+      "substitute": {
+        "default": { "available": false, "trusted": false, "running": false, "words": 0, "underlines": false },
         "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
       }
     },
@@ -46,6 +65,7 @@
         "unsupported": ["web", "linux", "ios", "android", "tvos", "terminal"]
       }
     },
-    { "event": "typingmove", "on": "root", "raised": "emit", "args": ["TypingMove"], "hold": 64 }
+    { "event": "typingmove", "on": "root", "raised": "emit", "args": ["TypingMove"], "hold": 64 },
+    { "event": "typingcapture", "on": "root", "raised": "emit", "args": ["TypingCapture"], "hold": 16 }
   ]
 }

@@ -9,6 +9,8 @@
 // - password fields, secure input and eloq's own windows are skipped.
 // - a swap deletes the word and types the replacement as key events, which every text field
 //   takes; the tap ignores its own events.
+// - the same tap serves the underlines (Underlines.swift), which it tells when the text moves,
+//   and the capture shortcut (Capture.swift), control-option-command-l.
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
@@ -23,6 +25,10 @@ public final class TypingModule: ExactPackage {
         Watcher.shared.listeners.append { [weak self] move in
             self?.context.emit("typingmove", [move])
         }
+        Watcher.shared.captures.append { [weak self] capture in
+            self?.context.emit("typingcapture", [capture])
+        }
+        DispatchQueue.main.async { Services.install() }
     }
 
     public func later(_ name: String, _ args: [String: Any], preferred: Any?, reply: @escaping ([String: Any]) -> Void) {
@@ -34,6 +40,9 @@ public final class TypingModule: ExactPackage {
                 Watcher.shared.load(args["table"] as? String ?? "")
                 Watcher.shared.start()
                 context.changed("typing.typingStatus")
+                reply(Watcher.shared.status())
+            case "setUnderlines":
+                Underlines.shared.enabled = args["on"] as? Bool ?? true
                 reply(Watcher.shared.status())
             case "openAccessibilitySettings":
                 let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -75,6 +84,8 @@ private struct Offer {
 private final class Watcher {
     static let shared = Watcher()
     var listeners: [([String: Any]) -> Void] = []
+    /// a word to add, or to open in eloq: `{kind, text, overused, target, app}`
+    var captures: [([String: Any]) -> Void] = []
 
     private var table = TypingLookup(forms: [:], maxWords: 0)
     private var moves: [String: [Move]] = [:]
@@ -82,6 +93,10 @@ private final class Watcher {
     private var typed = ""
     private var offer: Offer?
     private let panel = OfferPanel()
+    private var scan = TextScan()
+    private var capture: Capture?
+    private var captureSerial = 0
+    private let capturePanel = CapturePanel()
     // marks the key events a swap posts, so the tap lets them through untouched
     fileprivate static let ownEvents: Int64 = 0x454c_4f51 // "ELOQ"
 
@@ -93,7 +108,8 @@ private final class Watcher {
     }
 
     func status() -> [String: Any] {
-        ["available": true, "trusted": AXIsProcessTrusted(), "running": tap != nil, "words": Double(moves.count)]
+        ["available": true, "trusted": AXIsProcessTrusted(), "running": tap != nil, "words": Double(moves.count),
+         "underlines": Underlines.shared.enabled]
     }
 
     /// the export's typing table: `{maxWords, forms, moves}`
@@ -110,12 +126,17 @@ private final class Watcher {
             }
         }
         moves = next
+        let targets = (object["targets"] as? [String: Any])?["forms"] as? [String: [String]] ?? [:]
+        scan = TextScan(overused: Array(table.forms.keys), targets: Array(targets.keys))
+        Underlines.shared.load(scan)
     }
 
     func start() {
         guard tap == nil, AXIsProcessTrusted() else { return }
+        Underlines.shared.start()
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue)
-            | (1 << CGEventType.rightMouseDown.rawValue)
+            | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.leftMouseUp.rawValue)
+            | (1 << CGEventType.scrollWheel.rawValue)
         guard let port = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                            eventsOfInterest: CGEventMask(mask), callback: tapped, userInfo: nil) else { return }
         tap = port
@@ -131,6 +152,7 @@ private final class Watcher {
     func reset() {
         typed = ""
         dismiss(kept: false)
+        endCapture()
     }
 
     private func dismiss(kept: Bool) {
@@ -146,6 +168,15 @@ private final class Watcher {
 
     /// a key or a click; nil swallows it (a swap's tab or digit)
     fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> CGEvent? {
+        if type == .scrollWheel {
+            Underlines.shared.moved(restAfter: 0.22)
+            return event
+        }
+        if type == .leftMouseUp {
+            // a click moves the cursor or the focus; a drag may have moved the window
+            Underlines.shared.changed(after: 0.12)
+            return event
+        }
         if type == .leftMouseDown || type == .rightMouseDown {
             reset()
             return event
@@ -153,6 +184,20 @@ private final class Watcher {
         if event.getIntegerValueField(.eventSourceUserData) == Watcher.ownEvents { return event }
         let flags = event.flags
         let code = event.getIntegerValueField(.keyboardEventKeycode)
+
+        if code == Int64(kVK_ANSI_L), flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]) == [.maskCommand, .maskControl, .maskAlternate] {
+            dismiss(kept: false)
+            beginCapture()
+            return nil
+        }
+        if let capture, takeCaptureKey(code, flags, capture) { return nil }
+        if [123, 124, 125, 126].contains(code) {
+            // an arrow moves the cursor and seldom the text: look again, and leave the lines until then
+            Underlines.shared.changed(after: 0.1)
+        } else if flags.intersection([.maskCommand, .maskControl]).isEmpty || [6, 7, 9].contains(code) {
+            // a key that types, deletes or pages moves the text, as do undo, cut and paste
+            Underlines.shared.moved(restAfter: 0.3)
+        }
 
         if let offer {
             if code == 48, !flags.contains(.maskCommand) { // tab
@@ -235,6 +280,120 @@ private final class Watcher {
             let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
             up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unit)
             send(up)
+        }
+    }
+
+    // MARK: capture
+
+    private func sendCapture(_ kind: String, _ capture: Capture, overused: Bool = false, target: Bool = false) {
+        let event: [String: Any] = ["kind": kind, "text": capture.text, "overused": overused, "target": target, "app": capture.app]
+        for listener in captures { listener(event) }
+    }
+
+    private func endCapture() {
+        guard capture != nil else { return }
+        capture = nil
+        captureSerial += 1
+        capturePanel.orderOut(nil)
+    }
+
+    /// the shortcut: read the selection of the front app and show what eloq knows of it
+    fileprivate func beginCapture() {
+        endCapture()
+        let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        guard !IsSecureEventInputEnabled() else { return }
+        let element = SelectionReader.focused()
+        let anchor = SelectionReader.anchor(of: element)
+        if let text = SelectionReader.selection(of: element) {
+            present(text, app: app, at: anchor)
+            return
+        }
+        SelectionReader.copied(mark: Watcher.ownEvents) { [weak self] text in
+            self?.present(text ?? "", app: app, at: anchor)
+        }
+    }
+
+    /// a word from the selection, or from the services menu
+    fileprivate func present(_ raw: String, app: String, at anchor: NSRect) {
+        let text = SelectionReader.clean(raw)
+        guard !text.isEmpty else {
+            // nothing is selected: the add sheet in eloq, ready for typing
+            sendCapture("open", Capture(text: "", app: app, state: .new))
+            return
+        }
+        let state: Capture.State
+        if TypingLookup.tokenize(text).count > SelectionReader.maxWords || text.count > 80 {
+            state = .tooLong
+        } else if let hit = table.lookup(text), TypingLookup.normalize(hit.text) == TypingLookup.normalize(text) {
+            state = .overused(moves: hit.termIds.flatMap { moves[$0] ?? [] }.map(\.text))
+        } else if scan.kind(of: text) == .target {
+            state = .target
+        } else {
+            state = .new
+        }
+        let next = Capture(text: text, app: app, state: state)
+        capture = next
+        captureSerial += 1
+        capturePanel.show(next, at: anchor)
+        if state == .tooLong { closeCapture(after: 1.6) }
+    }
+
+    /// saved without a panel to ask (the services menu's two commands)
+    fileprivate func save(_ raw: String, overused: Bool, app: String) {
+        let text = SelectionReader.clean(raw)
+        let mouse = NSEvent.mouseLocation
+        let anchor = NSRect(x: mouse.x, y: mouse.y - 4, width: 1, height: 18)
+        guard !text.isEmpty, TypingLookup.tokenize(text).count <= SelectionReader.maxWords, text.count <= 80 else {
+            capture = Capture(text: text, app: app, state: .tooLong)
+            captureSerial += 1
+            capturePanel.show(capture!, at: anchor)
+            closeCapture(after: 1.6)
+            return
+        }
+        saved(Capture(text: text, app: app, state: .new), overused: overused, at: anchor)
+    }
+
+    private func saved(_ capture: Capture, overused: Bool, at anchor: NSRect? = nil) {
+        sendCapture("add", capture, overused: overused, target: !overused)
+        var done = capture
+        done.state = .saved(overused: overused)
+        self.capture = done
+        captureSerial += 1
+        // with no new place, the panel keeps its top left corner
+        let frame = capturePanel.frame
+        capturePanel.show(done, at: anchor ?? NSRect(x: frame.minX + 14, y: frame.maxY + 6, width: 1, height: 1))
+        closeCapture(after: 1.1)
+    }
+
+    private func closeCapture(after delay: TimeInterval) {
+        let serial = captureSerial
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, serial == self.captureSerial else { return }
+            self.endCapture()
+        }
+    }
+
+    /// a key while the panel is shown; true takes it from the other app
+    private func takeCaptureKey(_ code: Int64, _ flags: CGEventFlags, _ capture: Capture) -> Bool {
+        let bare = flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty
+        switch (capture.state, code) {
+        case (_, 53) where bare: // escape
+            endCapture()
+            return true
+        case (.new, Int64(kVK_ANSI_O)) where bare:
+            saved(capture, overused: true)
+            return true
+        case (.new, Int64(kVK_ANSI_T)) where bare:
+            saved(capture, overused: false)
+            return true
+        case (.new, 36) where bare, (.overused, 36) where bare, (.target, 36) where bare: // return
+            sendCapture("open", capture)
+            endCapture()
+            return true
+        default:
+            // any other key is the other app's, and the panel has had its say
+            endCapture()
+            return false
         }
     }
 
@@ -395,5 +554,31 @@ private final class OfferPanel: NSPanel {
         }
         setFrame(NSRect(x: origin.x, y: origin.y, width: width, height: size.height), display: true)
         orderFrontRegardless()
+    }
+}
+
+/// the services menu's two commands, "Add to Eloq as Overused" and "Add to Eloq as Target":
+/// the system hands over the selected text of any app that offers services
+final class Services: NSObject {
+    private static let shared = Services()
+
+    static func install() {
+        guard NSApp.servicesProvider == nil else { return }
+        NSApp.servicesProvider = shared
+        NSUpdateDynamicServices()
+    }
+
+    private func take(_ board: NSPasteboard, overused: Bool) {
+        guard let text = board.string(forType: .string) else { return }
+        let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        DispatchQueue.main.async { Watcher.shared.save(text, overused: overused, app: app) }
+    }
+
+    @objc func addOverused(_ board: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        take(board, overused: true)
+    }
+
+    @objc func addTarget(_ board: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        take(board, overused: false)
     }
 }

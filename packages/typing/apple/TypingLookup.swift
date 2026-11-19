@@ -69,3 +69,70 @@ struct TypingLookup {
         return s.trimmingCharacters(in: edges)
     }
 }
+
+/// every library word in a text, ported from packages/matcher/src/matcher.ts `scan`: left to
+/// right, the longest form at each word wins, and matches never overlap. offsets are utf-16,
+/// as the accessibility api counts them.
+struct TextScan {
+    enum Kind: String { case overused, target }
+    struct Mark: Equatable {
+        let start: Int
+        let end: Int
+        let kind: Kind
+        /// each word of the match, for a phrase that wraps onto a second line
+        let words: [Range<Int>]
+    }
+
+    private let forms: [String: Kind]
+    private let heads: [String: Int]
+    var isEmpty: Bool { forms.isEmpty }
+
+    /// a form in both lists is overused
+    init(overused: [String] = [], targets: [String] = []) {
+        var forms: [String: Kind] = [:]
+        for form in targets { forms[form] = .target }
+        for form in overused { forms[form] = .overused }
+        var heads: [String: Int] = [:]
+        for form in forms.keys {
+            let tokens = TypingLookup.tokenize(form)
+            guard let first = tokens.first else { continue }
+            let head = String(form[first])
+            heads[head] = max(heads[head] ?? 0, tokens.count)
+        }
+        self.forms = forms
+        self.heads = heads
+    }
+
+    func kind(of text: String) -> Kind? { forms[TypingLookup.normalize(text)] }
+
+    func scan(_ text: String) -> [Mark] {
+        guard !forms.isEmpty, !text.isEmpty else { return [] }
+        let tokens = TypingLookup.tokenize(text)
+        var normalized: [Substring: String] = [:]
+        var marks: [Mark] = []
+        var i = 0
+        while i < tokens.count {
+            let raw = text[tokens[i]]
+            let head: String
+            if let known = normalized[raw] { head = known } else {
+                head = TypingLookup.normalize(String(raw))
+                normalized[raw] = head
+            }
+            var taken = 0
+            if let longest = heads[head] {
+                for k in stride(from: min(longest, tokens.count - i), through: 1, by: -1) {
+                    let start = tokens[i].lowerBound, end = tokens[i + k - 1].upperBound
+                    let form = k == 1 ? head : TypingLookup.normalize(String(text[start..<end]))
+                    guard let kind = forms[form], TypingLookup.tokenize(form).count == k else { continue }
+                    let offset = { (index: String.Index) in index.utf16Offset(in: text) }
+                    marks.append(Mark(start: offset(start), end: offset(end), kind: kind,
+                                      words: tokens[i..<(i + k)].map { offset($0.lowerBound)..<offset($0.upperBound) }))
+                    taken = k
+                    break
+                }
+            }
+            i += taken > 0 ? taken : 1
+        }
+        return marks
+    }
+}

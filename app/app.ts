@@ -63,16 +63,20 @@ function ack(write: Write): Reply {
 
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
 
-// what the typing overlay needs: the matcher's table of overused words, and each one's accepted
-// moves (the targets to offer, first the one with the highest confidence)
+// what the typing overlay needs: the matcher's table of overused words, each one's accepted
+// moves (the targets to offer, first the one with the highest confidence), and the table of
+// target words, which the overlay underlines beside the overused ones. a word that is both
+// counts as overused.
 function typingTable(terms: Term[], links: Link[]) {
-  const table = tableForTyping(buildIndex(terms.filter((t) => t.overused).map((t) => ({ id: t.id, text: t.text, forms: t.forms }))));
+  const index = (list: Term[]) => tableForTyping(buildIndex(list.map((t) => ({ id: t.id, text: t.text, forms: t.forms }))));
+  const table = index(terms.filter((t) => t.overused));
+  const targets = index(terms.filter((t) => t.target && !t.overused));
   const moves: Record<string, Array<{ id: string; text: string; useWhen: string }>> = {};
   for (const l of [...links].sort((a, b) => b.confidence - a.confidence)) {
     if (l.status !== 'accepted' || !l.toText) continue;
     (moves[l.from] ??= []).push({ id: l.to, text: l.toText, useWhen: l.useWhen });
   }
-  return { ...table, moves };
+  return { ...table, moves, targets: { maxWords: targets.maxWords, forms: targets.forms } };
 }
 
 // app:/data/snapshot.json: what other programs on this mac read without the app's database: the

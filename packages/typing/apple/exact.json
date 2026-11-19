@@ -13,9 +13,27 @@
   "sources": {
     "swift": [
       "TypingLookup.swift",
+      "Underlines.swift",
+      "Capture.swift",
       "Typing.swift"
     ]
   },
   "artifacts": [],
-  "class": "TypingModule"
+  "class": "TypingModule",
+  "services": [
+    {
+      "message": "addOverused",
+      "title": "Add to Eloq as Overused",
+      "send": [
+        "text"
+      ]
+    },
+    {
+      "message": "addTarget",
+      "title": "Add to Eloq as Target",
+      "send": [
+        "text"
+      ]
+    }
+  ]
 }
