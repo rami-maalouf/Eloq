@@ -70,13 +70,18 @@ enum UnderlineReader {
         var clip = field
         var web = false
         var current = element
-        for _ in 0..<24 {
+        // a web page nests a field many groups deep (a chat app's message box: about twenty), so
+        // the walk goes far, and ends at the page: chromium has clipped the field to it already
+        for _ in 0..<64 {
             guard let above = attribute(current, kAXParentAttribute), CFGetTypeID(above) == AXUIElementGetTypeID() else { break }
             let parent = above as! AXUIElement
             let role = attribute(parent, kAXRoleAttribute) as? String ?? ""
-            if role == "AXWebArea" { web = true }
             if role == "AXScrollArea" || role == "AXWindow" || role == "AXWebArea", let box = frame(parent) { clip = clip.intersection(box) }
             if role == "AXWindow" { return (clip, web) }
+            if role == "AXWebArea" {
+                web = true
+                break
+            }
             current = parent
         }
         if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID(),
