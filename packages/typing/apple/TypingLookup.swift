@@ -33,8 +33,10 @@ struct TypingLookup {
     func atCursor(_ before: String) -> (hit: Hit, trailing: String)? {
         var core = Substring(before)
         var trailing = ""
-        while trailing.count < 2, let last = core.last, Self.separators.contains(last) {
-            trailing.insert(last, at: trailing.startIndex)
+        // a web field shows a space at a line's end as a no-break space: it is the space that was
+        // typed, and a swap types a plain space again
+        while trailing.count < 2, let last = core.last, Self.separators.contains(last) || last == "\u{A0}" {
+            trailing.insert(last == "\u{A0}" ? " " : last, at: trailing.startIndex)
             core.removeLast()
         }
         guard let last = core.last, Self.isWordChar(last) else { return nil }

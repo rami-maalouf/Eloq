@@ -19,11 +19,13 @@
 Second line is vivid and precise, kind of.</textarea>
 <input id="field" aria-label="field" value="A single line that is really compelling">
 <div class="chat" contenteditable="true" id="chat" aria-label="chat">A chat box that is very interesting.<br>It has a bunch of lines.<br>Line three is really vivid.<br>Line four is basically hidden.<br>Line five is precise.</div>
+<div class="chat" contenteditable="true" id="scratch" aria-label="scratch"></div>
 <script>
   document.getElementById('scroller').scrollTop = 90;
   // "#chat:interesting" puts the cursor after that word in that field; "+2" two characters later, "-3" three earlier
   const [id, word, shift] = decodeURIComponent(location.hash.slice(1)).split(':');
   const el = document.getElementById(id);
+  if (el && !word) el.focus();
   if (el && word) {
     el.focus();
     const move = Number(shift || 0);

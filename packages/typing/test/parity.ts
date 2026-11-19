@@ -54,6 +54,8 @@ const cursor: Array<[string, string | null, string]> = [
   // a swap types the separators again, so only a space and plain punctuation may follow the word
   ['really\t', null, ''], ['really\r', null, ''], ['really 😀', null, ''], ['really\uFFFC', null, ''], ['really…', 'really', '…'],
   ['really”', 'really', '”'], ['really?)', 'really', '?)'],
+  // a web field shows the space at a line's end as a no-break space
+  ['really\u00A0', 'really', ' '], ['really.\u00A0', 'really', '. '],
 ];
 
 const dir = mkdtempSync(join(tmpdir(), 'eloq-typing-parity-'));

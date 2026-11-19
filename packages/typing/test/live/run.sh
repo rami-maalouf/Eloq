@@ -1,9 +1,12 @@
 #!/bin/sh
-# the live proof of @eloq/typing: its readers and windows on real text fields, with no key tap
-# and no screen capture (only the fixture's window and eloq's own are captured, by id).
+# the live proof of @eloq/typing: its readers and windows on real text fields, with no screen
+# capture (only the fixture's window and eloq's own are captured, by id). textedit and electron
+# use no key tap and stay behind your windows.
 #
 #   sh run.sh textedit [<word>]              a native field (a text file of its own in textedit)
 #   sh run.sh electron [<field>:<word>[:n]]  the fields of an electron app (./electron)
+#   sh run.sh e2e                            the offer end to end, through the running eloq app:
+#                                            the fixture takes the front and the keyboard for 15 s
 #
 # the shell needs the accessibility and screen recording permissions. pictures go to ./out.
 # the fixture opens behind the other windows and is closed at the end. textedit also reopens
@@ -41,8 +44,24 @@ electron)
   "$out/harness" "$out/electron.png" "$fixture" "eloq-typing-live" || true
   kill "$fixture" 2>/dev/null || true
   ;;
+e2e)
+  # the offer end to end: real keys through the running app's tap into the fixture, in front
+  swiftc -O "$apple/TypingLookup.swift" "$apple/AX.swift" "$apple/Layout.swift" "$apple/Caret.swift" "$apple/Underlines.swift" \
+    "$here/e2e/main.swift" -o "$out/e2e"
+  cd "$here/electron"
+  [ -d node_modules/electron ] || bun install
+  before=$(osascript -e 'tell application "System Events" to get bundle identifier of first process whose frontmost is true' 2>/dev/null || true)
+  env -u ELECTRON_RUN_AS_NODE node_modules/electron/dist/Electron.app/Contents/MacOS/Electron . "scratch:" front >/dev/null 2>&1 &
+  fixture=$!
+  sleep 4
+  status=0
+  "$out/e2e" "$fixture" || status=$?
+  kill "$fixture" 2>/dev/null || true
+  [ -z "$before" ] || open -b "$before" 2>/dev/null || true
+  exit "$status"
+  ;;
 *)
-  sed -n '2,11p' "$0"
+  sed -n '2,13p' "$0"
   exit 64
   ;;
 esac

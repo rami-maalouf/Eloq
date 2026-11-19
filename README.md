@@ -54,8 +54,9 @@ stored or sent, and password fields are skipped.
 
 - **The offer.** When the text cursor rests at the end of a word you overuse,
   a small panel shows the words you want to use instead: a word you just typed,
-  or one that was already there. Tab takes the first, 1-9 picks one, and any
-  other key keeps your word.
+  or one that was already there. Tab takes the first and a digit picks
+  another; once a space follows the word the digit needs Option, so a number
+  you type stays a number. Any other key keeps your word.
 - **The underlines.** Amber dots under the words you overuse and a faint green
   line under the targets you used, in the field you write in. They hide while
   you type or scroll. A switch in the Progress tab turns them off.
@@ -79,8 +80,16 @@ bun packages/typing/test/parity.ts       # the Swift lookup against the TypeScri
 cd app && bun exact.mjs test web         # the app, in a browser; needs the backend
 sh packages/typing/test/live/run.sh textedit interesting   # the readers on a real native field
 sh packages/typing/test/live/run.sh electron chat:interesting   # and on an Electron window
+bun packages/typing/test/keys.ts         # which keys Eloq takes and which it lets through
+sh packages/typing/test/live/run.sh e2e  # the offer end to end, through the running app
 ```
 
-The two `live` runs open a window of their own behind your windows, read only
-that window, and write a picture to `packages/typing/test/live/out`. The shell
-needs the Accessibility and Screen Recording permissions.
+The `textedit` and `electron` runs open a window of their own behind your
+windows, read only that window, and write a picture to
+`packages/typing/test/live/out`. The shell needs the Accessibility and Screen
+Recording permissions.
+
+The `e2e` run is the one that takes the keyboard: its window comes to the front
+for about fifteen seconds, real keys go through the running app's key tap, and
+it stops at once if another app comes to the front. It uses one overused word
+of your library, so it adds a few counts for that word to today's progress.
