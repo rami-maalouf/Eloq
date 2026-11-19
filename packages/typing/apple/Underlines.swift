@@ -8,6 +8,8 @@
 // - while you type or scroll the lines are put away, and they return when the text rests,
 //   so they never trail behind moving text.
 // - password fields, secure input, search fields and eloq's own windows are skipped.
+// - electron apps and web views (chromium) draw a rich text field from text nodes, and say where
+//   a word is only for one node at a time: there the pass reads the nodes that show.
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
@@ -63,21 +65,79 @@ enum UnderlineReader {
     }
 
     /// the part of a field that shows: a text view is as tall as its whole text, and the scroll
-    /// area and the window around it show a part
-    static func visibleFrame(_ element: AXUIElement, _ field: CGRect) -> CGRect {
+    /// area and the window around it show a part. `web` says the field is in a web page.
+    static func visibleFrame(_ element: AXUIElement, _ field: CGRect) -> (clip: CGRect, web: Bool) {
         var clip = field
+        var web = false
         var current = element
-        for _ in 0..<12 {
+        for _ in 0..<24 {
             guard let above = attribute(current, kAXParentAttribute), CFGetTypeID(above) == AXUIElementGetTypeID() else { break }
             let parent = above as! AXUIElement
             let role = attribute(parent, kAXRoleAttribute) as? String ?? ""
+            if role == "AXWebArea" { web = true }
             if role == "AXScrollArea" || role == "AXWindow" || role == "AXWebArea", let box = frame(parent) { clip = clip.intersection(box) }
-            if role == "AXWindow" { return clip }
+            if role == "AXWindow" { return (clip, web) }
             current = parent
         }
         if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID(),
            let box = frame(window as! AXUIElement) { clip = clip.intersection(box) }
-        return clip
+        return (clip, web)
+    }
+
+    /// several attributes of an element in one round trip; nil where the element has none
+    private static func attributes(_ element: AXUIElement, _ names: [String]) -> [CFTypeRef?] {
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element, names as CFArray, [], &values) == .success,
+              let list = values as? [AnyObject], list.count == names.count else { return names.map { _ in nil } }
+        return list.map { value in
+            if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(value as! AXValue) == .axError { return nil }
+            return value is NSNull ? nil : value
+        }
+    }
+
+    /// a web page never costs more than this many elements in a pass
+    static let maxNodes = 500
+    private static let nodeNames = [kAXRoleAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXValueAttribute, kAXChildrenAttribute] as [String]
+
+    /// the text nodes of a web rich text field that show, each with its text. chromium clips a
+    /// node's box to what shows, so a node that has scrolled away has no height and is passed by,
+    /// with everything inside it.
+    static func textNodes(_ element: AXUIElement) -> [(node: AXUIElement, text: String)] {
+        var found: [(AXUIElement, String)] = []
+        var waiting = (attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []).reversed() as [AXUIElement]
+        var visited = 0
+        while let node = waiting.popLast(), visited < maxNodes {
+            visited += 1
+            let values = attributes(node, nodeNames)
+            var size = CGSize.zero
+            if let extent = values[2], CFGetTypeID(extent) == AXValueGetTypeID() { AXValueGetValue(extent as! AXValue, .cgSize, &size) }
+            guard size.height >= 2, size.width >= 2 else { continue }
+            if (values[0] as? String) == "AXStaticText" {
+                if let text = values[3] as? String, !text.isEmpty { found.append((node, text)) }
+            } else if let children = values[4] as? [AXUIElement] {
+                waiting.append(contentsOf: children.reversed())
+            }
+        }
+        return found
+    }
+
+    /// where the selection, or the cursor, of a field is drawn, in accessibility coordinates. a
+    /// native field answers for a character range; a web rich text field answers only for its
+    /// text markers. a cursor with no selection has a box with no width.
+    static func selectionBox(_ element: AXUIElement) -> CGRect? {
+        if let selected = range(attribute(element, kAXSelectedTextRangeAttribute)) {
+            // the character before the cursor has a box when the cursor itself has none
+            var probe = selected.length > 0 ? selected : CFRange(location: max(selected.location - 1, 0), length: selected.location > 0 ? 1 : 0)
+            if let value = AXValueCreate(.cfRange, &probe),
+               let box = rect(parameterized(element, kAXBoundsForRangeParameterizedAttribute, value)), box.height > 2, box.height < 200 {
+                return selected.length > 0 ? box : CGRect(x: box.maxX, y: box.minY, width: 0, height: box.height)
+            }
+        }
+        if let markers = attribute(element, "AXSelectedTextMarkerRange"),
+           let box = rect(parameterized(element, "AXBoundsForTextMarkerRange", markers)), box.height > 2, box.height < 200 {
+            return box
+        }
+        return nil
     }
 
     /// the focused element of an app, when it is text a person edits and may be read
@@ -121,27 +181,42 @@ enum UnderlineReader {
     /// one pass: scan the field's visible text and find where each matched word is drawn
     static func read(_ element: AXUIElement, with scan: TextScan, primaryHeight: CGFloat) -> UnderlinePass? {
         guard let whole = frame(element) else { return nil }
-        let field = visibleFrame(element, whole)
-        guard !field.isNull, field.width > 8, field.height > 8, let (text, offset) = visibleText(element) else { return nil }
+        let (field, web) = visibleFrame(element, whole)
+        guard !field.isNull, field.width > 8, field.height > 8 else { return nil }
         var lines: [Underline] = []
+        var marked = 0
         // a box partly outside the field is text that has scrolled under its edge
         let inside = field.insetBy(dx: -1, dy: -1)
         func add(_ box: CGRect, _ kind: TextScan.Kind) {
             guard inside.contains(box) else { return }
             lines.append(Underline(rect: NSRect(x: box.minX, y: primaryHeight - box.maxY, width: box.width, height: box.height), kind: kind))
         }
-        for mark in scan.scan(text).prefix(maxMarks) {
-            guard let all = bounds(element, offset + mark.start, offset + mark.end) else { continue }
-            guard mark.words.count > 1, let first = mark.words.first,
-                  let head = bounds(element, offset + first.lowerBound, offset + first.upperBound), all.height > head.height * 1.5 else {
-                add(all, mark.kind)
-                continue
+        /// the marks of one text, which `holder` knows the boxes of, `offset` into its own text
+        func mark(_ holder: AXUIElement, _ text: String, _ offset: Int) {
+            for mark in scan.scan(text) {
+                guard marked < maxMarks else { return }
+                marked += 1
+                guard let all = bounds(holder, offset + mark.start, offset + mark.end) else { continue }
+                guard mark.words.count > 1, let first = mark.words.first,
+                      let head = bounds(holder, offset + first.lowerBound, offset + first.upperBound), all.height > head.height * 1.5 else {
+                    add(all, mark.kind)
+                    continue
+                }
+                // the phrase wraps: one line under each of its words
+                add(head, mark.kind)
+                for word in mark.words.dropFirst() {
+                    if let box = bounds(holder, offset + word.lowerBound, offset + word.upperBound) { add(box, mark.kind) }
+                }
             }
-            // the phrase wraps: one line under each of its words
-            add(head, mark.kind)
-            for word in mark.words.dropFirst() {
-                if let box = bounds(element, offset + word.lowerBound, offset + word.upperBound) { add(box, mark.kind) }
-            }
+        }
+        if web {
+            for (node, text) in textNodes(element) { mark(node, text, 0) }
+        }
+        // a native field, a web field with no nodes (a plain textarea), or nodes that gave no boxes
+        if lines.isEmpty {
+            marked = 0
+            guard let (text, offset) = visibleText(element) else { return nil }
+            mark(element, text, offset)
         }
         return UnderlinePass(frame: NSRect(x: field.minX, y: primaryHeight - field.maxY, width: field.width, height: field.height), lines: lines)
     }
@@ -213,6 +288,7 @@ final class Underlines {
     private var timer: Timer?
     private var started = false
     private var busy = false
+    private var woken: Set<pid_t> = []
 
     func load(_ next: TextScan) {
         scan = next
@@ -315,7 +391,21 @@ final class Underlines {
 
     // MARK: the front app's own announcements
 
+    /// an electron app builds its accessibility tree when something asks for it, and older ones
+    /// only after this flag is set. it is electron's own switch for tools like this one, set once
+    /// for each app; the app answers a little later, so look again then.
+    private func wake(_ app: NSRunningApplication) {
+        guard let bundle = app.bundleURL, !woken.contains(app.processIdentifier),
+              FileManager.default.fileExists(atPath: bundle.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path) else { return }
+        woken.insert(app.processIdentifier)
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.25)
+        AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        for delay in [0.7, 1.4] { refresh(after: delay, quiet: true) }
+    }
+
     private func watchFrontApp() {
+        if let front = NSWorkspace.shared.frontmostApplication { wake(front) }
         guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != observed else { return }
         if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
         observer = nil

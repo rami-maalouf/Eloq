@@ -53,14 +53,11 @@ enum SelectionReader {
     /// where the selection is drawn, in appkit screen coordinates; else the mouse
     static func anchor(of element: AXUIElement?) -> NSRect {
         let mouse = NSEvent.mouseLocation
-        let fallback = NSRect(x: mouse.x, y: mouse.y - 4, width: 1, height: 18)
-        guard let element, let value = UnderlineReader.attribute(element, kAXSelectedTextRangeAttribute),
-              let bounds = UnderlineReader.parameterized(element, kAXBoundsForRangeParameterizedAttribute, value),
-              CFGetTypeID(bounds) == AXValueGetTypeID() else { return fallback }
-        var rect = CGRect.zero
-        guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect), rect.width > 0, rect.height > 0 else { return fallback }
+        guard let element, let box = UnderlineReader.selectionBox(element) else {
+            return NSRect(x: mouse.x, y: mouse.y - 4, width: 1, height: 18)
+        }
         let primary = NSScreen.screens.first?.frame.height ?? 0
-        return NSRect(x: rect.minX, y: primary - rect.maxY, width: rect.width, height: rect.height)
+        return NSRect(x: box.minX, y: primary - box.maxY, width: max(box.width, 1), height: box.height)
     }
 
     /// ask the front app to copy, read what it copied, and put the clipboard back as it was

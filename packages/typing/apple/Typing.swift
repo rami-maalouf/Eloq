@@ -457,25 +457,12 @@ private final class Watcher {
     /// the text cursor's rectangle in appkit screen coordinates, else the mouse
     private func caretRect() -> NSRect {
         let mouse = NSEvent.mouseLocation
-        let fallback = NSRect(x: mouse.x, y: mouse.y, width: 1, height: 18)
-        guard let element = focusedElement() else { return fallback }
-        var rangeValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
-              let rangeValue else { return fallback }
-        var range = CFRange()
-        AXValueGetValue(rangeValue as! AXValue, .cfRange, &range)
-        // the character before the cursor has a box when the cursor itself has none
-        var probe = CFRange(location: max(range.location - 1, 0), length: range.location > 0 ? 1 : 0)
-        guard let probeValue = AXValueCreate(.cfRange, &probe) else { return fallback }
-        var boundsValue: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(element, kAXBoundsForRangeParameterizedAttribute as CFString,
-                                                         probeValue, &boundsValue) == .success, let boundsValue else { return fallback }
-        var rect = CGRect.zero
-        AXValueGetValue(boundsValue as! AXValue, .cgRect, &rect)
-        guard rect.width >= 0, rect.height > 0 else { return fallback }
+        guard let element = focusedElement(), let box = UnderlineReader.selectionBox(element) else {
+            return NSRect(x: mouse.x, y: mouse.y, width: 1, height: 18)
+        }
         // ax uses top-left origin on the primary screen; appkit uses bottom-left
         let primary = NSScreen.screens.first?.frame.height ?? 0
-        return NSRect(x: rect.maxX, y: primary - rect.maxY, width: 1, height: rect.height)
+        return NSRect(x: box.maxX, y: primary - box.maxY, width: 1, height: box.height)
     }
 }
 
