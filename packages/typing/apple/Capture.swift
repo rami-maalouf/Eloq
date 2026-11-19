@@ -178,11 +178,11 @@ final class CapturePanel: NSPanel {
             } else {
                 stack.addArrangedSubview(label("Try: \(moves.prefix(4).joined(separator: ", "))", size: NSFont.systemFontSize))
             }
-            stack.addArrangedSubview(label("Return opens it in Eloq · Esc closes", size: small - 1, color: .tertiaryLabelColor))
+            stack.addArrangedSubview(label("Already in your library", size: small - 1, color: .tertiaryLabelColor))
         case .target:
             stack.addArrangedSubview(label("“\(shownText)” is one of your targets", size: small, weight: .semibold, color: .secondaryLabelColor))
             stack.addArrangedSubview(label("Use it more.", size: NSFont.systemFontSize))
-            stack.addArrangedSubview(label("Return opens it in Eloq · Esc closes", size: small - 1, color: .tertiaryLabelColor))
+            stack.addArrangedSubview(label("Already in your library", size: small - 1, color: .tertiaryLabelColor))
         case .tooLong:
             stack.addArrangedSubview(label("That selection is long", size: small, weight: .semibold, color: .secondaryLabelColor))
             stack.addArrangedSubview(label("Select a word or a short phrase.", size: NSFont.systemFontSize))

@@ -165,6 +165,8 @@ component App
     send underlinesSet = setUnderlines(on=on)
   action show
     focus()
+  action quit
+    close()
   action showAdd
     focus()
     draftText = ""
@@ -520,6 +522,8 @@ component App
             text "Open Eloq"
           button press=showAdd popovertarget="status-menu" popovertargetaction="hide" testId="status-add"
             text "New Word…"
+          button press=quit popovertarget="status-menu" popovertargetaction="hide" testId="status-quit"
+            text "Quit Eloq"
       dialog id="remove" role="alertdialog" aria-label=`Delete “${textOf(lib.terms, aimed)}”?`
         text "Its links go with it. This can’t be undone."
         button press=remove(aimed) destructive=true commandfor="remove" command="close" testId="remove-confirm"

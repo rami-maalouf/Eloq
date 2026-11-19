@@ -321,16 +321,7 @@ private final class Watcher {
             sendCapture("open", Capture(text: "", app: app, state: .new))
             return
         }
-        let state: Capture.State
-        if TypingLookup.tokenize(text).count > SelectionReader.maxWords || text.count > 80 {
-            state = .tooLong
-        } else if let hit = table.lookup(text), TypingLookup.normalize(hit.text) == TypingLookup.normalize(text) {
-            state = .overused(moves: hit.termIds.flatMap { moves[$0] ?? [] }.map(\.text))
-        } else if scan.kind(of: text) == .target {
-            state = .target
-        } else {
-            state = .new
-        }
+        let state = known(text)
         let next = Capture(text: text, app: app, state: state)
         capture = next
         captureSerial += 1
@@ -338,16 +329,29 @@ private final class Watcher {
         if state == .tooLong { closeCapture(after: 1.6) }
     }
 
+    /// what the library already says of a cleaned selection
+    private func known(_ text: String) -> Capture.State {
+        if TypingLookup.tokenize(text).count > SelectionReader.maxWords || text.count > 80 { return .tooLong }
+        if let hit = table.lookup(text), TypingLookup.normalize(hit.text) == TypingLookup.normalize(text) {
+            return .overused(moves: hit.termIds.flatMap { moves[$0] ?? [] }.map(\.text))
+        }
+        return scan.kind(of: text) == .target ? .target : .new
+    }
+
     /// saved without a panel to ask (the services menu's two commands)
     fileprivate func save(_ raw: String, overused: Bool, app: String) {
         let text = SelectionReader.clean(raw)
         let mouse = NSEvent.mouseLocation
         let anchor = NSRect(x: mouse.x, y: mouse.y - 4, width: 1, height: 18)
-        guard !text.isEmpty, TypingLookup.tokenize(text).count <= SelectionReader.maxWords, text.count <= 80 else {
-            capture = Capture(text: text, app: app, state: .tooLong)
+        guard !text.isEmpty else { return }
+        let state = known(text)
+        guard state == .new else {
+            // too long, or already in the library: say which, and add nothing
+            let shown = Capture(text: text, app: app, state: state)
+            capture = shown
             captureSerial += 1
-            capturePanel.show(capture!, at: anchor)
-            closeCapture(after: 1.6)
+            capturePanel.show(shown, at: anchor)
+            closeCapture(after: 2.2)
             return
         }
         saved(Capture(text: text, app: app, state: .new), overused: overused, at: anchor)
