@@ -22,6 +22,27 @@ struct TypingLookup {
         return nil
     }
 
+    /// what may stand between a word and the cursor and be typed again after a swap: a space and
+    /// plain punctuation. a line break, a tab, an emoji or an attachment may not: a swap could not
+    /// put them back as they were.
+    static let separators: Set<Character> = [" ", ".", ",", ";", ":", "!", "?", ")", "]", "}", "\"", "\u{201D}", "\u{00BB}", "\u{2026}"]
+
+    /// the library word the cursor rests on, from the text before the cursor: the word ends at
+    /// the cursor, or one or two separators before it (a space, a full stop and a space), which
+    /// `trailing` holds. nil inside a word, after a joiner, and at the start of a line.
+    func atCursor(_ before: String) -> (hit: Hit, trailing: String)? {
+        var core = Substring(before)
+        var trailing = ""
+        while trailing.count < 2, let last = core.last, Self.separators.contains(last) {
+            trailing.insert(last, at: trailing.startIndex)
+            core.removeLast()
+        }
+        guard let last = core.last, Self.isWordChar(last) else { return nil }
+        let text = String(core)
+        guard let hit = lookup(text), text.hasSuffix(hit.text) else { return nil }
+        return (hit, trailing)
+    }
+
     static func isWordChar(_ c: Character) -> Bool {
         c.unicodeScalars.allSatisfy { s in
             switch s.properties.generalCategory {
@@ -57,15 +78,17 @@ struct TypingLookup {
         return out
     }
 
+    // javascript's \s, and what normalize.ts strips from both ends
+    private static let spaces = CharacterSet(charactersIn: "\u{09}\u{0A}\u{0B}\u{0C}\u{0D}\u{20}\u{A0}\u{1680}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
+        .union(CharacterSet(charactersIn: UnicodeScalar(0x2000)!...UnicodeScalar(0x200A)!))
+    private static let edges = spaces.union(CharacterSet(charactersIn: "\"'“”«»()[]{}.,;:!?"))
+
     static func normalize(_ text: String) -> String {
         var s = text.precomposedStringWithCanonicalMapping
         for a in ["\u{2018}", "\u{2019}", "\u{02BC}", "`", "\u{00B4}"] { s = s.replacingOccurrences(of: a, with: "'") }
         for d in 0x2010...0x2015 { s = s.replacingOccurrences(of: String(UnicodeScalar(d)!), with: "-") }
         s = s.lowercased()
-        let spaces = CharacterSet(charactersIn: "\u{09}\u{0A}\u{0B}\u{0C}\u{0D}\u{20}\u{A0}\u{1680}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}")
-            .union(CharacterSet(charactersIn: UnicodeScalar(0x2000)!...UnicodeScalar(0x200A)!))
         s = s.components(separatedBy: spaces).filter { !$0.isEmpty }.joined(separator: " ")
-        let edges = spaces.union(CharacterSet(charactersIn: "\"'“”«»()[]{}.,;:!?"))
         return s.trimmingCharacters(in: edges)
     }
 }

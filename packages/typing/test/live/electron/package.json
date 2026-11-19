@@ -1,0 +1,7 @@
+{
+  "name": "eloq-typing-live-fixture",
+  "private": true,
+  "version": "1.0.0",
+  "main": "main.js",
+  "devDependencies": { "electron": "^33.0.0" }
+}

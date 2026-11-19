@@ -44,9 +44,21 @@ const expected = cases.map((c) => {
 
 const expectedScans = cases.map((c) => scan(c, all).map((m) => ({ start: m.start, end: m.end, kind: kindOf(m.termIds) })));
 
+// the offer follows the cursor: the word must end at the cursor, or one or two separators before it
+const cursor: Array<[string, string | null, string]> = [
+  ['That was interesting', 'interesting', ''], ['That was interesting ', 'interesting', ' '],
+  ['That was interesting. ', 'interesting', '. '], ['That was interesting.  ', null, ''],
+  ['That was interest', null, ''], ['That was interesting-', null, ''], ['interesting\n', null, ''],
+  ['a bunch of', 'a bunch of', ''], ['A  bunch\nof, ', 'A  bunch\nof', ', '], ['', null, ''], [' ', null, ''],
+  ['I can’t stand!', 'can’t stand', '!'], ['uninteresting', null, ''], ['Really', 'Really', ''],
+  // a swap types the separators again, so only a space and plain punctuation may follow the word
+  ['really\t', null, ''], ['really\r', null, ''], ['really 😀', null, ''], ['really\uFFFC', null, ''], ['really…', 'really', '…'],
+  ['really”', 'really', '”'], ['really?)', 'really', '?)'],
+];
+
 const dir = mkdtempSync(join(tmpdir(), 'eloq-typing-parity-'));
 try {
-  writeFileSync(join(dir, 'input.json'), JSON.stringify({ forms: table.forms, maxWords: table.maxWords, cases, overusedForms, targetForms }));
+  writeFileSync(join(dir, 'input.json'), JSON.stringify({ forms: table.forms, maxWords: table.maxWords, cases, overusedForms, targetForms, cursor: cursor.map(([text]) => text) }));
   writeFileSync(join(dir, 'main.swift'), `
 import Foundation
 let data = try! Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
@@ -60,13 +72,17 @@ let scanner = TextScan(overused: input["overusedForms"] as! [String], targets: i
 let scans: [Any] = (input["cases"] as! [String]).map { c in
   scanner.scan(c).map { ["start": $0.start, "end": $0.end, "kind": $0.kind.rawValue] as [String: Any] }
 }
-FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: ["lookups": out, "scans": scans]))
+let cursors: [Any] = (input["cursor"] as! [String]).map { c in
+  guard let at = lookup.atCursor(c) else { return NSNull() }
+  return ["text": at.hit.text, "trailing": at.trailing] as [String: Any]
+}
+FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: ["lookups": out, "scans": scans, "cursors": cursors]))
 `);
   const built = spawnSync('swiftc', ['-O', join(import.meta.dir, '../apple/TypingLookup.swift'), join(dir, 'main.swift'), '-o', join(dir, 'parity')], { encoding: 'utf8' });
   if (built.status !== 0) throw new Error(built.stderr);
   const ran = spawnSync(join(dir, 'parity'), [join(dir, 'input.json')], { encoding: 'utf8', maxBuffer: 64 << 20 });
   if (ran.status !== 0) throw new Error(ran.stderr);
-  const answer = JSON.parse(ran.stdout) as { lookups: Array<{ ids: string[]; text: string } | null>; scans: Array<Array<{ start: number; end: number; kind: string }>> };
+  const answer = JSON.parse(ran.stdout) as { lookups: Array<{ ids: string[]; text: string } | null>; scans: Array<Array<{ start: number; end: number; kind: string }>>; cursors: Array<{ text: string; trailing: string } | null> };
   const actual = answer.lookups;
   let failures = 0;
   cases.forEach((c, i) => {
@@ -81,8 +97,12 @@ FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: ["lo
     marks += expectedScans[i].length;
     if (a !== e && failures++ < 15) console.log(`scan mismatch ${JSON.stringify(c)}\n  swift ${a}\n  ts    ${e}`);
   });
+  cursor.forEach(([text, word, trailing], i) => {
+    const got = answer.cursors[i], a = JSON.stringify(got && [got.text, got.trailing]), e = JSON.stringify(word === null ? null : [word, trailing]);
+    if (a !== e && failures++ < 15) console.log(`cursor mismatch ${JSON.stringify(text)}\n  swift ${a}\n  want  ${e}`);
+  });
   const hits = expected.filter(Boolean).length;
-  console.log(`${cases.length} cases, ${hits} hits, ${marks} scan marks: ${failures === 0 ? 'swift matches the typescript reference' : `${failures} mismatches`}`);
+  console.log(`${cases.length} cases, ${hits} hits, ${marks} scan marks, ${cursor.length} cursor cases: ${failures === 0 ? 'swift matches the typescript reference' : `${failures} mismatches`}`);
   process.exit(failures === 0 ? 0 : 1);
 } finally {
   rmSync(dir, { recursive: true, force: true });

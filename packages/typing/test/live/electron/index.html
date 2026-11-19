@@ -1,0 +1,49 @@
+<!doctype html><meta charset="utf-8"><title>eloq-typing-live</title>
+<!-- the fields of an electron app: a long rich text note in a scroller under a header (obsidian),
+     a plain text box, a one-line field, and a small rich text box that scrolls (a chat app). -->
+<style>
+ body { margin: 0; font: 14px/1.5 -apple-system, sans-serif; color: #111; }
+ header { height: 48px; background: #f0f0f3; border-bottom: 1px solid #ccc; padding: 12px 16px; box-sizing: border-box; font-weight: 600; }
+ .scroller { height: 220px; overflow: auto; padding: 8px 16px; border-bottom: 1px solid #ccc; }
+ [contenteditable] { outline: none; }
+ p { margin: 0 0 6px; }
+ textarea, input { display: block; width: 660px; margin: 12px 16px; font: inherit; padding: 8px; box-sizing: border-box; }
+ .chat { margin: 12px 16px; padding: 8px 10px; border: 1px solid #999; border-radius: 8px; max-height: 64px; overflow: auto; width: 640px; }
+</style>
+<header>Header that text scrolls under</header>
+<div class="scroller" id="scroller"><div contenteditable="true" id="note" aria-label="note">
+<p>This is a very interesting demo, and it is really nice to see a bunch of words.</p>
+<p>A compelling story is vivid and precise. Basically, it was kind of interesting.</p>
+<p>Note line 1: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 2: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 3: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 4: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 5: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 6: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 7: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 8: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 9: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 10: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 11: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 12: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 13: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 14: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 15: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 16: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 17: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 18: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 19: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 20: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 21: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 22: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 23: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 24: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 25: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 26: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 27: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 28: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 29: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 30: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 31: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 32: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 33: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 34: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 35: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 36: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 37: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 38: this is a very plain sentence with one compelling word and it is really long enough.</p><p>Note line 39: this is a very plain sentence with one compelling word and it is really long enough.</p></div></div>
+<textarea id="area" rows="3" aria-label="area">A textarea: basically a very interesting place.
+Second line is vivid and precise, kind of.</textarea>
+<input id="field" aria-label="field" value="A single line that is really compelling">
+<div class="chat" contenteditable="true" id="chat" aria-label="chat">A chat box that is very interesting.<br>It has a bunch of lines.<br>Line three is really vivid.<br>Line four is basically hidden.<br>Line five is precise.</div>
+<script>
+  document.getElementById('scroller').scrollTop = 90;
+  // "#chat:interesting" puts the cursor after that word in that field; "+2" two characters later, "-3" three earlier
+  const [id, word, shift] = decodeURIComponent(location.hash.slice(1)).split(':');
+  const el = document.getElementById(id);
+  if (el && word) {
+    el.focus();
+    const move = Number(shift || 0);
+    if ('value' in el) {
+      const at = el.value.indexOf(word) + word.length + move;
+      el.setSelectionRange(at, at);
+    } else {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const i = node.textContent.indexOf(word);
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, i + word.length + move);
+        range.collapse(true);
+        const selection = getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        break;
+      }
+    }
+  }
+</script>

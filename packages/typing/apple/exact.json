@@ -13,8 +13,14 @@
   "sources": {
     "swift": [
       "TypingLookup.swift",
+      "AX.swift",
+      "Layout.swift",
+      "Caret.swift",
       "Underlines.swift",
+      "Panels.swift",
       "Capture.swift",
+      "Gate.swift",
+      "Watcher.swift",
       "Typing.swift"
     ]
   },
