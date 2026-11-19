@@ -88,3 +88,29 @@ test('deleting a word takes its links', async () => {
   expect((await call('list_links', { status: 'all' })).value.total).toBe(0);
   expect((await call('get_term', { term: 'compelling' })).error).toStartWith('NOT_FOUND');
 });
+
+test('login reads the email and the password as separate lines', async () => {
+  // a person types the two answers one after another; leaving the first prompt must not close stdin.
+  const email = `login-${Date.now()}@example.com`, password = ' spaces stay ';
+  const made = await signup(url, email, password);
+  if (!made.ok) throw new Error(made.why.code);
+  const config = await mkdtemp(join(tmpdir(), 'eloq-login-'));
+  try {
+    const { ELOQ_EMAIL: _e, ELOQ_PASSWORD: _p, ...env } = process.env;
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts'), 'login'], {
+      env: { ...env, ELOQ_URL: url, ELOQ_CONFIG_DIR: config },
+      stdin: 'pipe', stderr: 'pipe',
+    });
+    child.stdin.write(`${email}\n`);
+    await child.stdin.flush();
+    await Bun.sleep(300);
+    child.stdin.write(`${password}\n`);
+    await child.stdin.flush();
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).not.toContain('AbortError');
+    expect(code).toBe(0);
+    expect(err).toContain('signed in');
+  } finally {
+    await rm(config, { recursive: true, force: true });
+  }
+});

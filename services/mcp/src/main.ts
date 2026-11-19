@@ -9,24 +9,55 @@ import { registerTools } from './tools.ts';
 
 const url = (process.env.ELOQ_URL ?? 'http://127.0.0.1:4420').replace(/\/+$/, '');
 
+// typed input not yet consumed by a prompt (a paste can carry both lines at once).
+let pending = '';
+
+// one chunk from stdin, or null at its end. listeners, not `for await`: leaving a
+// for-await loop early destroys stdin, and the next prompt then throws AbortError.
+function nextChunk(): Promise<string | null> {
+  const stdin = process.stdin;
+  if (stdin.readableEnded) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const done = (value: string | null) => {
+      stdin.off('data', onData);
+      stdin.off('end', onEnd);
+      stdin.pause();
+      resolve(value);
+    };
+    const onData = (chunk: Buffer | string) => done(String(chunk));
+    const onEnd = () => done(null);
+    stdin.on('data', onData);
+    stdin.once('end', onEnd);
+    stdin.resume();
+  });
+}
+
 async function prompt(question: string, hidden = false): Promise<string> {
   process.stderr.write(question);
-  if (hidden && process.stdin.isTTY) process.stdin.setRawMode(true);
-  let answer = '';
-  for await (const chunk of process.stdin) {
-    const s = String(chunk);
-    if (hidden) {
-      for (const ch of s) {
-        if (ch === '\r' || ch === '\n') { process.stdin.setRawMode?.(false); process.stderr.write('\n'); return answer; }
+  const raw = hidden && process.stdin.isTTY;
+  if (raw) process.stdin.setRawMode(true);
+  try {
+    let answer = '';
+    for (;;) {
+      while (pending) {
+        const ch = pending[0]!;
+        pending = pending.slice(1);
+        if (ch === '\r' || ch === '\n') {
+          if (ch === '\r' && pending[0] === '\n') pending = pending.slice(1);
+          if (hidden) process.stderr.write('\n');
+          // a password keeps its spaces; an email does not.
+          return hidden ? answer : answer.trim();
+        }
         if (ch === '\u0003') process.exit(130);
-        if (ch === '\u007f') answer = answer.slice(0, -1); else answer += ch;
+        if (ch === '\u007f' || ch === '\b') answer = answer.slice(0, -1); else answer += ch;
       }
-    } else {
-      answer += s;
-      if (answer.includes('\n')) return answer.split('\n')[0]!.trim();
+      const chunk = await nextChunk();
+      if (chunk === null) return hidden ? answer : answer.trim();
+      pending += chunk;
     }
+  } finally {
+    if (raw) process.stdin.setRawMode(false);
   }
-  return answer.trim();
 }
 
 const command = process.argv[2];
