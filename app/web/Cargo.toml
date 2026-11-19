@@ -10,10 +10,10 @@ build = "build.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-exact-logic = { path = "../../../expo-exact-eloq/logic" }
-exact-web = { path = "../../../expo-exact-eloq/host/web" }
-exact-web-capabilities = { path = "../../../expo-exact-eloq/host/web-capabilities" }
-exact-js-web = { path = "../../../expo-exact-eloq/js/web" }
+exact-logic = { path = "../.exact/checkout/logic" }
+exact-web = { path = "../.exact/checkout/host/web" }
+exact-web-capabilities = { path = "../.exact/checkout/host/web-capabilities" }
+exact-js-web = { path = "../.exact/checkout/js/web" }
 
 [build-dependencies]
-exact-js-bake = { path = "../../../expo-exact-eloq/js/bake" }
+exact-js-bake = { path = "../.exact/checkout/js/bake" }

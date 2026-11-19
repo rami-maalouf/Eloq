@@ -1,5 +1,5 @@
 {
-  "$schema": "../../expo-exact-eloq/scripts/app.schema.json",
+  "$schema": ".exact/checkout/scripts/app.schema.json",
   "name": "Eloq",
   "short_name": "Eloq",
   "id": "studio.orbitlabs.eloq.app",
@@ -27,7 +27,7 @@
   },
   "typescript": {
     "sources": {
-      "snapback4": "../../expo-exact-eloq/snapback4/ts",
+      "snapback4": ".exact/checkout/snapback4/ts",
       "backend": "../snapback/generated",
       "matcher": "../packages/matcher/src"
     }
