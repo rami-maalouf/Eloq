@@ -84,3 +84,48 @@ test "progress starts empty with its next step"
   tap "tab-progress"
   clock settle
   expect tree missing "stat-0"
+
+test "the keyboard reaches every command"
+  type "email" "keys@example.com"
+  type "password" "correct horse battery staple"
+  tap "signup"
+  clock data
+  type "app" key "Meta+n"
+  clock settle
+  expect tree has "add-text"
+  type "add-text" "vivid"
+  tap "add-overused"
+  tap "add-target"
+  type "add-text" key "Meta+s"
+  clock data
+  expect tree has "term-vivid"
+  expect tree missing "add-text"
+  type "app" key "Meta+n"
+  clock settle
+  type "add-text" key "Escape"
+  clock settle
+  expect tree missing "add-text"
+  type "app" key "Meta+2"
+  clock settle
+  expect state nav.tab == "progress"
+  type "app" key "Meta+n"
+  clock settle
+  expect state nav.tab == "library"
+  expect tree has "add-text"
+  type "add-text" key "Escape"
+  clock settle
+  type "app" key "Meta+3"
+  clock settle
+  expect state nav.tab == "inbox"
+  type "app" key "Meta+f"
+  clock settle
+  expect state nav.tab == "library"
+  tap "term-vivid"
+  clock data
+  clock settle
+  type "app" key "Meta+e"
+  clock settle
+  expect tree has "edit-text"
+  type "edit-text" key "Escape"
+  clock settle
+  expect tree missing "edit-text"

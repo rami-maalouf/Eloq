@@ -2,7 +2,7 @@
 // app.ts answers every read from this device's Snapback partition and syncs it; a write is
 // kept here at once and sent by the next sync, so everything works offline.
 use EmptyState from "exact:content"
-use typingStatus, setTypingTable, openAccessibilitySettings, typingmove, TypingStatus, TypingMove from "@eloq/typing"
+use typingStatus, setTypingTable, setUnderlines, openAccessibilitySettings, typingmove, typingcapture, TypingStatus, TypingMove, TypingCapture from "@eloq/typing"
 
 routes nav
   tab library "/"
@@ -103,6 +103,8 @@ component App
   state aimed = ""
   // the typing table last handed to the overlay
   state typingSent = ""
+  // thin lines under your words in other apps
+  state underlines = true persist
   resource time = exactTime() as shape Clock
   resource lib = library() with time.epochAtZero + sampledAt as shape Library else empty()
   resource typing = typingStatus() as shape TypingStatus else empty()
@@ -113,6 +115,7 @@ component App
   mutation linked as shape Reply queue refreshes lib then afterLink
   mutation reviewed as shape Reply queue refreshes lib
   mutation typingSet as shape TypingStatus
+  mutation underlinesSet as shape TypingStatus
   mutation typed as shape Reply queue
   derive signedIn = lib.principal != ""
   derive writing = pending(signed) or pending(added) or pending(edited) or pending(removed) or pending(linked) or pending(reviewed)
@@ -133,11 +136,47 @@ component App
     if lib.typing != "" and lib.typing != typingSent
       typingSent = lib.typing
       send typingSet = setTypingTable(table=lib.typing)
+    if typing.available and typing.underlines != underlines and not pending(underlinesSet)
+      send underlinesSet = setUnderlines(on=underlines)
   // the overlay saw an overused word in another app, swapped it, or it was kept
   action moved(m: TypingMove)
     send typed = recordTyping(m.kind, m.term, m.app, time.epochAtZero + performanceNow())
+  // the shortcut in another app, or the services menu: a word to keep, or one to look at here
+  action captured(c: TypingCapture)
+    if c.kind == "add"
+      send added = addTerm(c.text, c.overused, c.target, "", "", time.epochAtZero + performanceNow())
+    else
+      focus()
+      match first(lib.terms.filter(t => t.normalized == c.text.trim().toLowerCase()))
+        case some(t)
+          nav = go(select(nav, "library"), path("term", t.id))
+        case none
+          draftText = c.text
+          draftOverused = true
+          draftTarget = false
+          draftMeaning = ""
+          draftExample = ""
+          refusal = ""
+          nav = push(select(nav, "library"), "/add")
   action allowTyping
     openAccessibilitySettings()
+  action setUnderlined(on: bool)
+    underlines = on
+    send underlinesSet = setUnderlines(on=on)
+  action show
+    focus()
+  action showAdd
+    focus()
+    draftText = ""
+    draftOverused = true
+    draftTarget = false
+    draftMeaning = ""
+    draftExample = ""
+    refusal = ""
+    nav = push(select(nav, "library"), "/add")
+  action find
+    nav = select(nav, "library")
+    focus("search")
   action editEmail(v: string)
     email = v
   action editPassword(v: string)
@@ -166,7 +205,7 @@ component App
     draftMeaning = ""
     draftExample = ""
     refusal = ""
-    nav = push(nav, "/add")
+    nav = push(select(nav, "library"), "/add")
   action editDraftText(v: string)
     draftText = v
   action setDraftOverused(on: bool)
@@ -187,6 +226,8 @@ component App
 
   action save(id: string, word: string, overused: bool, target: bool, meaning: string, nuance: string, whenNotToUse: string, example: string, notes: string)
     send edited = editTerm(id, word, overused, target, meaning, nuance, whenNotToUse, example, notes, time.epochAtZero + performanceNow())
+  action openEdit(id: string)
+    nav = push(nav, path("editTerm", id))
   action afterEdit
     if top(nav).name == "editTerm"
       nav = back(nav)
@@ -222,7 +263,7 @@ component App
     send reviewed = removeLink(id, time.epochAtZero + performanceNow())
 
   view
-    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow typingmove=moved testId="app" width="100%" height="100%"
+    main navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow typingmove=moved typingcapture=captured testId="app" width="100%" height="100%"
       display="flex" flex-direction="column"
       if not signedIn and pending(lib)
         column flex=1 min-height=0
@@ -261,7 +302,7 @@ component App
                       text "Library" role="heading" aria-level=1 flex=1
                       button press=openAdd aria-label="Add Word" testId="add-term"
                         image "symbol:add"
-                      input type="search" value=query input=search placeholder="Search" aria-label="Search Words"
+                      input id="search" type="search" value=query input=search placeholder="Search" aria-label="Search Words"
                         testId="search" width="100%"
                     row role="radiogroup" aria-label="Show" padding="0 16px 8px" testId="filter"
                       button role="radio" aria-checked=(filter == "all") press=choose("all") testId="filter-all" flex=1
@@ -297,7 +338,7 @@ component App
                     header display="flex" align-items="center" gap=8 padding="8px 16px"
                       text (textOf(lib.terms, e.params.id) == "" ? "Not Found" : textOf(lib.terms, e.params.id)) role="heading" aria-level=2 flex=1 testId="detail-title"
                       if termOf(lib.terms, e.params.id).length > 0
-                        link href=path("editTerm", e.params.id) aria-label="Edit" testId="edit-term"
+                        button press=openEdit(e.params.id) aria-label="Edit Word" aria-keyshortcuts="Meta+E Control+E" testId="edit-term"
                           text "Edit"
                     if termOf(lib.terms, e.params.id).length > 0
                       list id="term-detail" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
@@ -311,10 +352,10 @@ component App
                 if e.name == "addTerm"
                   column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="add-form" position="absolute" inset=0
                     header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-                      button id="back" press=back aria-label="Cancel" testId="add-cancel"
+                      button id="back" press=back aria-label="Cancel" aria-keyshortcuts="Escape" testId="add-cancel"
                         text "Cancel"
                       text "New Word" role="heading"
-                      button press=add buttonStyle="bordered-prominent" aria-label="Save" testId="add-save"
+                      button press=add buttonStyle="bordered-prominent" aria-label="Save" aria-keyshortcuts="Meta+S Control+S" testId="add-save"
                         disabled=(addHint != "" or pending(added))
                         text "Save"
                     list id="add-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
@@ -348,10 +389,10 @@ component App
                 if e.name == "addLink"
                   column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="link-form" position="absolute" inset=0
                     header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-                      button id="back" press=back aria-label="Cancel" testId="link-cancel"
+                      button id="back" press=back aria-label="Cancel" aria-keyshortcuts="Escape" testId="link-cancel"
                         text "Cancel"
                       text `Instead of “${textOf(lib.terms, e.params.id)}”` role="heading"
-                      button press=addLink(e.params.id) buttonStyle="bordered-prominent" aria-label="Save" testId="link-save"
+                      button press=addLink(e.params.id) buttonStyle="bordered-prominent" aria-label="Save" aria-keyshortcuts="Meta+S Control+S" testId="link-save"
                         disabled=(linkTo == "" or pending(linked))
                         text "Save"
                     list id="link-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
@@ -381,6 +422,12 @@ component App
                         if not typing.trusted
                           button press=allowTyping buttonStyle="bordered" testId="allow-typing"
                             text "Allow…"
+                      if typing.trusted
+                        row padding="0 16px 8px" gap=8 align-items="center"
+                          column flex=1 min-width=0 gap=2
+                            text "Underline my words in other apps"
+                            text "Amber dots for words you overuse, a green line for targets you used. Control-Option-Command-L adds the selected word." font="-exact-footnote" color="-exact-secondary-label"
+                          input type="checkbox" switch checked=underlines change=setUnderlined aria-label="Underline my words in other apps" testId="underlines"
                     if lib.weeks.length == 0
                       EmptyState(symbol="symbol:chart", title="Nothing Counted Yet", message="Your agents count your overused and target words in what you say (record_transcript); they appear here by week.")
                     else
@@ -439,22 +486,40 @@ component App
                                 text "Accept"
                               button press=dismiss(s.id) buttonStyle="bordered" disabled=pending(reviewed) testId=`dismiss-${i}` flex=1
                                 text "Dismiss"
-        row role="tablist" testId="tabs"
-          button role="tab" aria-controls="panel-library" aria-selected=(nav.tab == "library") press=pick("library")
-            testId="tab-library" flex=1
-            image "symbol:book"
-            text "Library"
-          button role="tab" aria-controls="panel-progress" aria-selected=(nav.tab == "progress") press=pick("progress")
-            testId="tab-progress" flex=1
-            image "symbol:chart"
-            text "Progress"
-          button role="tab" aria-controls="panel-inbox" aria-selected=(nav.tab == "inbox") press=pick("inbox")
-            testId="tab-inbox" flex=1
-            image "symbol:sparkles"
-            text "Inbox"
-            if suggestions.length > 0
-              row background-color="-exact-system-red" border-radius=12
-                text `${suggestions.length}` font-variant-numeric="tabular-nums"
+      // always in the tree, so every host finds the tabs' routes; hidden until an account is signed in
+      row role="tablist" testId="tabs" display=(signedIn ? "flex" : "none")
+        button role="tab" aria-controls="panel-library" aria-selected=(nav.tab == "library") press=pick("library")
+          aria-keyshortcuts="Meta+1 Control+1" testId="tab-library" flex=1
+          image "symbol:book"
+          text "Library"
+        button role="tab" aria-controls="panel-progress" aria-selected=(nav.tab == "progress") press=pick("progress")
+          aria-keyshortcuts="Meta+2 Control+2" testId="tab-progress" flex=1
+          image "symbol:chart"
+          text "Progress"
+        button role="tab" aria-controls="panel-inbox" aria-selected=(nav.tab == "inbox") press=pick("inbox")
+          aria-keyshortcuts="Meta+3 Control+3" testId="tab-inbox" flex=1
+          image "symbol:sparkles"
+          text "Inbox"
+          if suggestions.length > 0
+            row background-color="-exact-system-red" border-radius=12
+              text `${suggestions.length}` font-variant-numeric="tabular-nums"
+      // commands that work on every tab. a button inside a tab's panel hears its chord only while
+      // that tab shows, so these stand outside the panels: on the mac each is a menu bar item with
+      // its chord, and elsewhere a button a screen reader finds. they take no room and no clicks.
+      if signedIn
+        row position="absolute" width="0.0625rem" height="0.0625rem" overflow="hidden" opacity=0 pointer-events="none"
+          button press=openAdd aria-label="New Word" aria-keyshortcuts="Meta+N Control+N" testId="command-new"
+            text "New Word"
+          button press=find aria-label="Find a Word" aria-keyshortcuts="Meta+F Control+F" testId="command-find"
+            text "Find a Word"
+      if typing.available
+        button -exact-menu="status" popovertarget="status-menu" aria-label="Eloq" testId="status-item"
+          image "symbol:book"
+        column id="status-menu" popover="auto" role="menu" aria-label="Eloq"
+          button press=show popovertarget="status-menu" popovertargetaction="hide" testId="status-open"
+            text "Open Eloq"
+          button press=showAdd popovertarget="status-menu" popovertargetaction="hide" testId="status-add"
+            text "New Word…"
       dialog id="remove" role="alertdialog" aria-label=`Delete “${textOf(lib.terms, aimed)}”?`
         text "Its links go with it. This can’t be undone."
         button press=remove(aimed) destructive=true commandfor="remove" command="close" testId="remove-confirm"
@@ -572,10 +637,10 @@ component EditTerm
   view
     column navigationKey=`${entry}` navigationPresentation="modal" navigationScroll="edit-form" position="absolute" inset=0
       header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
-        button id="back" press=cancel aria-label="Cancel" testId="edit-cancel"
+        button id="back" press=cancel aria-label="Cancel" aria-keyshortcuts="Escape" testId="edit-cancel"
           text "Cancel"
         text "Edit Word" role="heading"
-        button press=submit buttonStyle="bordered-prominent" aria-label="Save" testId="edit-save"
+        button press=submit buttonStyle="bordered-prominent" aria-label="Save" aria-keyshortcuts="Meta+S Control+S" testId="edit-save"
           disabled=(word.trim() == "" or not (overused or target) or busy)
           text "Save"
       list id="edit-form" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 width="28rem" max-width="100%"
