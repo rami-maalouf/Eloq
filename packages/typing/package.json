@@ -2,7 +2,7 @@
   "name": "@eloq/typing",
   "version": "1.0.0",
   "private": true,
-  "description": "Eloq's typing overlay on macOS: as you type in any app, an overused word shows the words you want to use instead, and Tab or 1-9 swaps it.",
+  "description": "Eloq in every other Mac app: the words to use instead of an overused word at the text cursor, thin lines under your library's words, and a shortcut and Services commands that add the selected word.",
   "exports": {
     ".": "./exact.json",
     "./apple": "./apple/exact.json"

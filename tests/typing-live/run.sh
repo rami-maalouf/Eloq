@@ -13,7 +13,7 @@
 # any documents it had open before; they are left alone.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
-apple="$here/../../apple"
+apple="$here/../../packages/typing/apple"
 out="$here/out"
 mkdir -p "$out"
 swiftc -O "$apple/TypingLookup.swift" "$apple/AX.swift" "$apple/Layout.swift" "$apple/Caret.swift" "$apple/Underlines.swift" \

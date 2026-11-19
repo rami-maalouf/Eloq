@@ -78,15 +78,15 @@ save, Esc cancel.
 bun test packages/matcher services/mcp   # needs `bun run backend:dev`
 bun packages/typing/test/parity.ts       # the Swift lookup against the TypeScript one
 cd app && bun exact.mjs test web         # the app, in a browser; needs the backend
-sh packages/typing/test/live/run.sh textedit interesting   # the readers on a real native field
-sh packages/typing/test/live/run.sh electron chat:interesting   # and on an Electron window
+sh tests/typing-live/run.sh textedit interesting   # the readers on a real native field
+sh tests/typing-live/run.sh electron chat:interesting   # and on an Electron window
 bun packages/typing/test/keys.ts         # which keys Eloq takes and which it lets through
-sh packages/typing/test/live/run.sh e2e  # the offer end to end, through the running app
+sh tests/typing-live/run.sh e2e  # the offer end to end, through the running app
 ```
 
 The `textedit` and `electron` runs open a window of their own behind your
 windows, read only that window, and write a picture to
-`packages/typing/test/live/out`. The shell needs the Accessibility and Screen
+`tests/typing-live/out`. The shell needs the Accessibility and Screen
 Recording permissions.
 
 The `e2e` run is the one that takes the keyboard: its window comes to the front
