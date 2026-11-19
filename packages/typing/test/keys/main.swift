@@ -1,8 +1,7 @@
 // the gate decides which keys eloq takes (apple/Gate.swift). this drives it with keys as the
 // tap would hand them over, with no tap and no events: run with `bun test/keys.ts`.
+import AppKit
 import Carbon.HIToolbox
-import CoreGraphics
-import Foundation
 
 var failures = 0
 func expect(_ what: String, _ ok: Bool) {
@@ -143,5 +142,20 @@ do {
     expect("a name's capitals are not a sentence", Swap.cased("phone", like: "iPhone") == "phone")
     expect("a phrase", Swap.cased("numerous", like: "A bunch of") == "Numerous")
 }
-print(failures == 0 ? "the gate takes and passes every key as written" : "\(failures) failures")
+// which underlines a key leaves on the screen: all but the cursor's own line from the cursor on
+do {
+    func line(_ x: CGFloat, _ y: CGFloat) -> Underline { Underline(rect: NSRect(x: x, y: y, width: 40, height: 16), kind: .overused) }
+    // appkit coordinates: a larger y is higher on the screen. the cursor is on the line at y 80.
+    let lines = [line(10, 100), line(300, 100), line(10, 80), line(200, 80), line(10, 60), line(300, 40)]
+    let caret = NSRect(x: 120, y: 80, width: 0, height: 16)
+    expect("typing keeps every line but the cursor's own from the cursor on", UnderlineReader.keptWhenTyping(lines, caret: caret, deleting: false) == [0, 1, 2, 4, 5])
+    expect("a delete takes the whole of the cursor's line", UnderlineReader.keptWhenTyping(lines, caret: caret, deleting: true) == [0, 1, 4, 5])
+    expect("a line that ends at the cursor stays when typing", UnderlineReader.keptWhenTyping([line(80, 80)], caret: caret, deleting: false) == [0])
+    expect("a word the cursor is inside goes", UnderlineReader.keptWhenTyping([line(100, 80)], caret: caret, deleting: false) == [])
+    var pass = UnderlinePass(frame: .zero, lines: lines)
+    pass.caret = caret
+    let fewer = pass.keeping([0, 4])
+    expect("a pass with fewer lines keeps its frame and its cursor", fewer.lines == [lines[0], lines[4]] && fewer.caret == caret && fewer != pass)
+}
+print(failures == 0 ? "the gate takes and passes every key as written, and typing keeps the lines it cannot move" : "\(failures) failures")
 exit(failures == 0 ? 0 : 1)

@@ -216,15 +216,16 @@ final class Watcher {
             lookAtCursor(after: 0.3)
             return
         }
-        Underlines.shared.moved(restAfter: 0.3)
         switch Int(key.code) {
         case kVK_Delete, kVK_ForwardDelete:
+            Underlines.shared.typed(deleting: true)
             // option deletes a whole word, and forward delete what is after the cursor
             if option || Int(key.code) == kVK_ForwardDelete { typed = "" } else if !typed.isEmpty { typed.removeLast() }
             hideOffer()
             lookAtCursor(after: 0.22)
             return
         case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Tab:
+            Underlines.shared.typed(deleting: false)
             // the word is done and counted; the cursor has gone to a new line or another field
             if let last = typed.last, TypingLookup.isWordChar(last), !sealed() { _ = count(boundary: "") }
             typed = ""
@@ -234,6 +235,7 @@ final class Watcher {
         default:
             break
         }
+        Underlines.shared.typed(deleting: false)
         guard !key.characters.isEmpty else {
             // a dead key or a function key: nothing typed yet, and the offer no longer holds
             hideOffer()

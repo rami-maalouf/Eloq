@@ -5,8 +5,10 @@
 //   keeps nothing: each pass scans, asks where the matched words are drawn, and forgets.
 // - the lines live in a window of eloq's that takes no clicks and never has the focus, so the
 //   other app's text, selection and menus behave exactly as before.
-// - while you type or scroll the lines are put away, and they return when the text rests,
-//   so they never trail behind moving text.
+// - a line never trails behind moving text, and a line that does not move is left alone. a key
+//   puts away only the lines it can move (the cursor's own line, from the cursor on), and one
+//   quick question tells whether the text above or below the cursor shifted with it. a scroll
+//   moves everything, so it puts all of them away. they return when the text rests.
 // - password fields, secure input, search fields and eloq's own windows are skipped.
 // - electron apps and web views (chromium) draw a rich text field from text nodes, and say where
 //   a word is only for one node at a time: there the pass reads the nodes that show.
@@ -20,11 +22,34 @@ struct Underline: Equatable {
     let kind: TextScan.Kind
 }
 
+/// who drew a line and where it said the word was: asked again, it tells whether the text moved
+struct UnderlineSource {
+    let holder: AXUIElement
+    let start: Int
+    let end: Int
+    let box: CGRect
+}
+
 /// what one pass over a text field found
 struct UnderlinePass: Equatable {
     /// the field's visible box, which the window covers
     let frame: NSRect
     let lines: [Underline]
+    /// one for each line
+    var sources: [UnderlineSource] = []
+    /// the cursor's box in appkit screen coordinates, when the field draws one
+    var caret: NSRect?
+
+    /// two passes are the same when they would draw the same
+    static func == (a: UnderlinePass, b: UnderlinePass) -> Bool { a.frame == b.frame && a.lines == b.lines }
+
+    /// the pass with only these lines
+    func keeping(_ indices: [Int]) -> UnderlinePass {
+        var next = UnderlinePass(frame: frame, lines: indices.map { lines[$0] })
+        next.sources = sources.count == lines.count ? indices.map { sources[$0] } : []
+        next.caret = caret
+        return next
+    }
 }
 
 enum UnderlineReader {
@@ -100,6 +125,24 @@ enum UnderlineReader {
         return box
     }
 
+    /// the lines a key typed at the cursor cannot move: every line but the cursor's own from the
+    /// cursor on. a delete can change the words before the cursor too, so it takes the whole of
+    /// the cursor's line. `caret` is where the cursor was at the last pass; typing has only
+    /// moved it on from there.
+    static func keptWhenTyping(_ lines: [Underline], caret: NSRect, deleting: Bool) -> [Int] {
+        lines.indices.filter { i in
+            let box = lines[i].rect
+            let onCursorLine = box.minY < caret.maxY - 1 && box.maxY > caret.minY + 1
+            return !onCursorLine || (!deleting && box.maxX <= caret.minX + 1)
+        }
+    }
+
+    /// true when the word is no longer drawn where its line is
+    static func moved(_ source: UnderlineSource) -> Bool {
+        guard let now = bounds(source.holder, source.start, source.end) else { return true }
+        return abs(now.minX - source.box.minX) > 0.5 || abs(now.minY - source.box.minY) > 0.5
+    }
+
     /// one pass: scan the field's visible text and find where each matched word is drawn
     static func read(_ element: AXUIElement, with scan: TextScan, primaryHeight: CGFloat) -> UnderlinePass? {
         let deadline = Date().addingTimeInterval(budget)
@@ -107,12 +150,14 @@ enum UnderlineReader {
         let (field, web) = visibleFrame(element, whole)
         guard !field.isNull, field.width > 8, field.height > 8 else { return nil }
         var lines: [Underline] = []
+        var sources: [UnderlineSource] = []
         var marked = 0
         // a box partly outside the field is text that has scrolled under its edge
         let inside = field.insetBy(dx: -1, dy: -1)
-        func add(_ box: CGRect, _ kind: TextScan.Kind) {
+        func add(_ box: CGRect, _ kind: TextScan.Kind, _ holder: AXUIElement, _ start: Int, _ end: Int) {
             guard inside.contains(box) else { return }
             lines.append(Underline(rect: AX.appKit(box, primaryHeight: primaryHeight), kind: kind))
+            sources.append(UnderlineSource(holder: holder, start: start, end: end, box: box))
         }
         /// the marks of one text, which `holder` knows the boxes of, `offset` into its own text
         func mark(_ holder: AXUIElement, _ text: String, _ offset: Int) {
@@ -122,13 +167,15 @@ enum UnderlineReader {
                 guard let all = bounds(holder, offset + mark.start, offset + mark.end) else { continue }
                 guard mark.words.count > 1, let first = mark.words.first,
                       let head = bounds(holder, offset + first.lowerBound, offset + first.upperBound), all.height > head.height * 1.5 else {
-                    add(all, mark.kind)
+                    add(all, mark.kind, holder, offset + mark.start, offset + mark.end)
                     continue
                 }
                 // the phrase wraps: one line under each of its words
-                add(head, mark.kind)
+                add(head, mark.kind, holder, offset + first.lowerBound, offset + first.upperBound)
                 for word in mark.words.dropFirst() {
-                    if let box = bounds(holder, offset + word.lowerBound, offset + word.upperBound) { add(box, mark.kind) }
+                    if let box = bounds(holder, offset + word.lowerBound, offset + word.upperBound) {
+                        add(box, mark.kind, holder, offset + word.lowerBound, offset + word.upperBound)
+                    }
                 }
             }
         }
@@ -140,7 +187,10 @@ enum UnderlineReader {
         } else {
             for (node, text) in nodes { mark(node, text, 0) }
         }
-        return UnderlinePass(frame: AX.appKit(field, primaryHeight: primaryHeight), lines: lines)
+        var pass = UnderlinePass(frame: AX.appKit(field, primaryHeight: primaryHeight), lines: lines)
+        pass.sources = sources
+        pass.caret = lines.isEmpty ? nil : AX.selectionBox(element).map { AX.appKit($0, primaryHeight: primaryHeight) }
+        return pass
     }
 }
 
@@ -216,6 +266,9 @@ final class Underlines {
     private var timer: Timer?
     private var started = false
     private var busy = false
+    /// where the cursor was at the last pass
+    private var caret: NSRect?
+    private var probing = 0
     private var lastInput = Date()
     /// the text is moving until then: no look before it
     private var restUntil = Date.distantPast
@@ -260,6 +313,56 @@ final class Underlines {
         refresh(after: delay)
     }
 
+    /// a key typed or deleted at the cursor: the lines it cannot move stay as they are. the full
+    /// look comes when the keys rest; until then one line above the cursor and one below are
+    /// asked whether the text shifted (a line wrapped, a chat box grew).
+    func typed(deleting: Bool) {
+        guard started else { return }
+        guard let pass = shown, let caret, pass.sources.count == pass.lines.count else {
+            // nothing shown, or a field that draws no cursor: as a scroll
+            moved(restAfter: 0.3)
+            return
+        }
+        lastInput = Date()
+        restUntil = lastInput.addingTimeInterval(0.3)
+        put(pass.keeping(UnderlineReader.keptWhenTyping(pass.lines, caret: caret, deleting: deleting)))
+        refresh(after: 0.3)
+        probing += 1
+        let asked = probing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { [weak self] in
+            guard let self, asked == self.probing, let kept = self.shown else { return }
+            // the nearest line on each side of the cursor's line stands for its side
+            let above = kept.lines.indices.filter { kept.lines[$0].rect.minY >= caret.maxY - 1 }
+            let below = kept.lines.indices.filter { kept.lines[$0].rect.maxY <= caret.minY + 1 }
+            let nearestAbove = above.min { kept.lines[$0].rect.minY < kept.lines[$1].rect.minY }
+            let nearestBelow = below.max { kept.lines[$0].rect.maxY < kept.lines[$1].rect.maxY }
+            guard nearestAbove != nil || nearestBelow != nil else { return }
+            let sources = (nearestAbove.map { kept.sources[$0] }, nearestBelow.map { kept.sources[$0] })
+            self.queue.async {
+                let aboveMoved = sources.0.map(UnderlineReader.moved) ?? false
+                let belowMoved = sources.1.map(UnderlineReader.moved) ?? false
+                guard aboveMoved || belowMoved else { return }
+                DispatchQueue.main.async {
+                    guard asked == self.probing, let now = self.shown, now == kept else { return }
+                    let gone = Set((aboveMoved ? above : []) + (belowMoved ? below : []))
+                    self.put(now.keeping(now.lines.indices.filter { !gone.contains($0) }))
+                }
+            }
+        }
+    }
+
+    /// show fewer of the lines that are shown, with no other change
+    private func put(_ next: UnderlinePass) {
+        guard next.lines.count != shown?.lines.count else { return }
+        guard !next.lines.isEmpty else {
+            shown = nil
+            window.orderOut(nil)
+            return
+        }
+        shown = next
+        window.lines.lines = next.lines
+    }
+
     /// something may have changed (a click): look again, and leave the lines until then
     func changed(after delay: TimeInterval) {
         guard started else { return }
@@ -269,6 +372,7 @@ final class Underlines {
 
     func hide() {
         generation += 1
+        probing += 1
         shown = nil
         window.orderOut(nil)
     }
@@ -325,7 +429,12 @@ final class Underlines {
             if shown != nil { hide() }
             return
         }
-        guard pass != shown else { return }
+        caret = pass.caret
+        guard pass != shown else {
+            // the same lines; who drew them may be new elements
+            shown = pass
+            return
+        }
         let appearing = shown == nil
         shown = pass
         window.setFrame(pass.frame, display: false)

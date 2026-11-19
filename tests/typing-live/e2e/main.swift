@@ -174,7 +174,32 @@ type("s more")
 pump(0.6)
 expect("typing on keeps the word, and the panel goes", text() == "It was \(word)s more" && !panelUp(), text())
 
-// 8. the capture shortcut on a selection: the panel asks, and escape adds nothing
+// 8. typing on another line leaves the underlines where they are: the line window stays up
+func linesUp() -> Bool {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+    return info.contains { ($0[kCGWindowOwnerPID as String] as? Int32) == eloq.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 3 }
+}
+clear()
+type("It was \(word) today.")
+press(kVK_Return, [.maskShift])
+type("More")
+pump(1.2)
+if linesUp() {
+    var stayed = true
+    for character in " text on the line below" {
+        type(String(character))
+        pump(0.05)
+        stayed = stayed && linesUp()
+    }
+    expect("the underline of the line above stays while the line below is typed", stayed)
+    type(" and \(word)")
+    pump(1.2)
+    expect("and it is still there when the keys rest", linesUp())
+} else {
+    print("skip the underlines are off or not drawn in this field: the stay-in-place check did not run")
+}
+
+// 9. the capture shortcut on a selection: the panel asks, and escape adds nothing
 clear()
 type("zzcapturecheck")
 pump(0.4)
