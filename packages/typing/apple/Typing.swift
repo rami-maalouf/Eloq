@@ -28,7 +28,11 @@ public final class TypingModule: ExactPackage {
         Watcher.shared.captures.append { [weak self] capture in
             self?.context.emit("typingcapture", [capture])
         }
-        DispatchQueue.main.async { Services.install() }
+        DispatchQueue.main.async { [weak self] in
+            Services.install()
+            // permission given while the app runs: start then, and tell the view, with no relaunch
+            Watcher.shared.awaitTrust { self?.context.changed("typing.typingStatus") }
+        }
     }
 
     public func later(_ name: String, _ args: [String: Any], preferred: Any?, reply: @escaping ([String: Any]) -> Void) {
@@ -90,6 +94,7 @@ private final class Watcher {
     private var table = TypingLookup(forms: [:], maxWords: 0)
     private var moves: [String: [Move]] = [:]
     private var tap: CFMachPort?
+    private var trustTimer: Timer?
     private var typed = ""
     private var offer: Offer?
     private let panel = OfferPanel()
@@ -143,6 +148,20 @@ private final class Watcher {
         let source = CFMachPortCreateRunLoopSource(nil, port, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)
+    }
+
+    /// until the key tap runs, look every two seconds for the accessibility permission; `started`
+    /// runs once, when the tap is up
+    func awaitTrust(_ started: @escaping () -> Void) {
+        guard tap == nil, trustTimer == nil else { return }
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+            guard let self, AXIsProcessTrusted() else { return }
+            self.start()
+            guard self.tap != nil else { return }
+            timer.invalidate()
+            self.trustTimer = nil
+            started()
+        }
     }
 
     fileprivate func reenable() {
